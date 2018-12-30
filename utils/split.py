@@ -33,7 +33,7 @@ def write_files(filename, data):
 
 
 if __name__ == "__main__":
-    path = '../Wiki_dataset/'
+    path = '/home/hongmin/table2text_nlg/data/dkb/'
     train, valid, test = split(get_file_list_from_dir(path + 'wiki_animal.json'))
     filename = path + 'train_wiki_A.json'
     write_files(filename, train)

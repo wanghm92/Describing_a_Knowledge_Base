@@ -3,11 +3,11 @@ import pickle
 import json
 import argparse
 
+prefix = "/home/hongmin/table2text_nlg/data/dkb/"
 
 class Read_file:
     """Read table and description files"""
     def __init__(self, num_sample=None, min_freq_fields=100, type=0, max_len=100, maxp=0):
-        prefix = "../Wiki_dataset/"
         self.type = type
         for mode in range(3):
             self.mode = mode
@@ -16,9 +16,9 @@ class Read_file:
             else:
                 num_sample /= 8
                 if self.type == 0:
-                    path = "../train_P.pkl"
+                    path = "{}/train_P.pkl".format(prefix)
                 else:
-                    path = "../train_A.pkl"
+                    path = "{}/train_A.pkl".format(prefix)
                 with open(path, 'rb') as output:
                     data = pickle.load(output)
                 maxp = data["maxp"]
@@ -205,19 +205,19 @@ class Read_file:
         print(len(self.sources))
         if mode == 0:
             if self.type == 0:
-                path = "../train_P.pkl"
+                path = "{}/train_P.pkl".format(prefix)
             else:
-                path = "../train_A.pkl"
+                path = "{}/train_A.pkl".format(prefix)
         elif mode == 1:
             if self.type == 0:
-                path = "../valid_P.pkl"
+                path = "{}/valid_P.pkl".format(prefix)
             else:
-                path = "../valid_A.pkl"
+                path = "{}/valid_A.pkl".format(prefix)
         else:
             if self.type == 0:
-                path = "../test_P.pkl"
+                path = "{}/test_P.pkl".format(prefix)
             else:
-                path = "../test_A.pkl"
+                path = "{}/test_A.pkl".format(prefix)
         data = {
             "source": self.sources,
             "target": self.targets,
