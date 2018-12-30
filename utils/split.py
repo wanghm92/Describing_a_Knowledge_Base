@@ -34,6 +34,7 @@ def write_files(filename, data):
 
 if __name__ == "__main__":
     path = '/home/hongmin/table2text_nlg/data/dkb/'
+
     train, valid, test = split(get_file_list_from_dir(path + 'wiki_animal.json'))
     filename = path + 'train_wiki_A.json'
     write_files(filename, train)
@@ -44,6 +45,7 @@ if __name__ == "__main__":
     filename = path + 'test_wiki_A.json'
     write_files(filename, test)
     print('Finished Animal test')
+
     train, valid, test = split(get_file_list_from_dir(path + 'wiki_person.json'))
     filename = path + 'train_wiki_P.json'
     write_files(filename, train)
