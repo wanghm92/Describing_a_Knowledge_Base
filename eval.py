@@ -82,5 +82,5 @@ if __name__ == '__main__':
     cand = {'generated_description1': 'how are you', 'generated_description2': 'Hello how are you'}
     ref = {'generated_description1': ['what are you', 'where are you'],
            'generated_description2': ['Hello how are you', 'Hello how is your day']}
-    x = Evaluate()
+    x = Evaluate_test()
     x.evaluate(live=True, cand=cand, ref=ref)
