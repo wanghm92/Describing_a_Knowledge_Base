@@ -11,6 +11,9 @@ from structure_generator.seq2seq import Seq2seq
 from eval_final import Evaluate
 from eval import Evaluate_test
 
+# -------------------------------------------------------------------------------------------------- #
+# ------------------------------------------ Config ------------------------------------------------ #
+# -------------------------------------------------------------------------------------------------- #
 
 class Config(object):
     cell = "GRU"
@@ -18,10 +21,10 @@ class Config(object):
     pemsize = 5
     nlayers = 1
     lr = 0.001
-    epochs = 19
-    batch_size = 300
+    epochs = 50
+    batch_size = 64
     dropout = 0
-    bidirectional = False
+    bidirectional = True
     max_grad_norm = 10
     max_len = 100
 
@@ -40,6 +43,9 @@ class ConfigTest(object):
     testmode = True
     max_len = 50
 
+# -------------------------------------------------------------------------------------------------- #
+# ------------------------------------------- Args ------------------------------------------------- #
+# -------------------------------------------------------------------------------------------------- #
 
 parser = argparse.ArgumentParser(description='pointer model')
 parser.add_argument('--seed', type=int, default=1111,
@@ -60,7 +66,7 @@ args = parser.parse_args()
 torch.manual_seed(args.seed)
 if torch.cuda.is_available():
     if not args.cuda:
-        print("WARNING: You have a CUDA device, so you should probably run with --cuda")
+        print("WARNING: You have- a CUDA device, so you should probably run with --cuda")
     else:
         torch.cuda.manual_seed(args.seed)
 
@@ -79,20 +85,37 @@ if args.type == 1:
     filepost += "_A.txt"
 else:
     filepost += "_P.txt"
+
+# -------------------------------------------------------------------------------------------------- #
+# ------------------------------------- Reading Datasets ------------------------------------------- #
+# -------------------------------------------------------------------------------------------------- #
+
+print("Reading training data ...")
 t_dataset = Table2text_seq(0, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
+print("Reading valid data ...")
 v_dataset = Table2text_seq(1, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
 print("number of training examples: %d" % t_dataset.len)
+
+# -------------------------------------------------------------------------------------------------- #
+# -------------------------------------- Building Model -------------------------------------------- #
+# -------------------------------------------------------------------------------------------------- #
+
 embedding = nn.Embedding(t_dataset.vocab.size, config.emsize, padding_idx=0)
-encoder = EncoderRNN(t_dataset.vocab.size, embedding, config.emsize, t_dataset.max_p, config.pemsize,
+encoder = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, hidden_size=config.emsize,
+                     pos_size=t_dataset.max_p, pemsize=config.pemsize,
                      input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers,
                      bidirectional=config.bidirectional, rnn_cell=config.cell, variable_lengths=True)
-decoder = DecoderRNN(t_dataset.vocab.size, embedding, config.emsize, config.pemsize, sos_id=3, eos_id=2, unk_id=1,
+decoder = DecoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, embed_size=config.emsize,
+                     pemsize=config.pemsize, sos_id=3, eos_id=2, unk_id=1,
                      n_layers=config.nlayers, rnn_cell=config.cell, bidirectional=config.bidirectional,
                      input_dropout_p=config.dropout, dropout_p=config.dropout, USE_CUDA=args.cuda, mask=args.mask)
 model = Seq2seq(encoder, decoder).to(device)
 optimizer = optim.Adam(model.parameters(), lr=config.lr)
 predictor = Predictor(model, v_dataset.vocab, args.cuda)
 
+# -------------------------------------------------------------------------------------------------- #
+# ------------------------------------ Training Functions ------------------------------------------ #
+# -------------------------------------------------------------------------------------------------- #
 
 def train_batch(dataset, batch_idx, model, teacher_forcing_ratio):
     batch_s, batch_o_s, batch_t, batch_o_t, batch_f, batch_pf, batch_pb, source_len, max_source_oov = \
@@ -121,7 +144,7 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio):
             loss, num_examples = train_batch(t_dataset, batch_idx, model, teacher_forcing_ratio)
             epoch_loss += loss * num_examples
             sys.stdout.write(
-                '%d batches processed. current batch loss: %f\r' %
+                '%d batches trained. current batch loss: %f\r' %
                 (batch_idx, loss)
             )
             sys.stdout.flush()
@@ -136,23 +159,30 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio):
         print('cand: ', cand[1])
         final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref)
         epoch_score = 2*final_scores['ROUGE_L']*final_scores['Bleu_4']/(final_scores['Bleu_4']+ final_scores['ROUGE_L'])
+
+        # TODO: save with epoch number
         if epoch_score > best_dev:
             torch.save(model.state_dict(), args.save)
             print("model saved")
             best_dev = epoch_score
 
+# -------------------------------------------------------------------------------------------------- #
+# ------------------------------------------- Main ------------------------------------------------- #
+# -------------------------------------------------------------------------------------------------- #
 
 if __name__ == "__main__":
+
+    # --------------------------------------- train -------------------------------------------- #
     if args.mode == 0:
-        # train
         try:
             print("start training...")
             train_epoches(t_dataset, v_dataset, model, config.epochs, 1)
         except KeyboardInterrupt:
             print('-' * 89)
             print('Exiting from training early')
+
+    # ------------------------------------ predict one ----------------------------------------- #
     elif args.mode == 1:
-        # predict sentence
         model.load_state_dict(torch.load(args.save))
         print("model restored")
         dataset = Table2text_seq(2, type=args.type, USE_CUDA=args.cuda, batch_size=1)
@@ -161,7 +191,7 @@ if __name__ == "__main__":
         while True:
             seq_str = input("Type index from (%d to %d) to continue:\n" %(0, dataset.len - 1))
             i = int(seq_str)
-            batch_s, batch_o_s, batch_f, batch_pf, batch_pb, sources, targets, fields, list_oovs, source_len\
+            batch_s, batch_o_s, batch_f, batch_pf, batch_pb, sources, targets, fields, list_oovs, source_len \
                 , max_source_oov, w2fs = dataset.get_batch(i)
             table = []
             for i in range(len(sources[0])):
@@ -177,6 +207,8 @@ if __name__ == "__main__":
             print("Result: ")
             print(outputs)
             print('-'*120)
+
+    # ------------------------------------ predict file ---------------------------------------- #
     elif args.mode == 2:
         model.load_state_dict(torch.load(args.save))
         print("model restored")
@@ -190,6 +222,8 @@ if __name__ == "__main__":
         f_out = open("Output" + filepost, 'w')
         f_out.writelines(lines)
         f_out.close()
+
+    # ----------------------------------- compute score ---------------------------------------- #
     elif args.mode == 3:
         model.load_state_dict(torch.load(args.save))
         print("model restored")
@@ -208,6 +242,8 @@ if __name__ == "__main__":
         for field in fields:
             f_out.write(field + '\t' + str(final_scores[field])+'\n')
         f_out.close()
+
+    # ----------------------------------- resume train ----------------------------------------- #
     elif args.mode == 4:
         # load and keep training
         model.load_state_dict(torch.load(args.save))
