@@ -1,6 +1,6 @@
 import torch
 from collections import Counter
-import pickle
+import pickle, sys
 
 
 class Vocabulary:
@@ -30,6 +30,7 @@ class Vocabulary:
     def _build_vocabulary(self, corpus, field):
         vocabulary = Counter(word for sent in corpus for word in sent)
         field_vocab = Counter(word for sent in field for word in sent)
+        print(field_vocab)
         if self.max_words:
             vocabulary = {word: freq for word,
                           freq in vocabulary.most_common(self.max_words)}
@@ -66,18 +67,20 @@ class Vocabulary:
         return _o_field
 
     def vectorize_source(self, vector, table):
-        source_oov = []
+        source_oov = {}
         _o_source, _source = [], []
+        cnt = 0
         for word in vector:
             try:
                 _o_source.append(self.word2idx[word])
                 _source.append(self.word2idx[word])
             except KeyError:
                 if word not in source_oov:
-                    _o_source.append(len(source_oov) + self.size)
-                    source_oov.append(word)
+                    _o_source.append(cnt + self.size)
+                    source_oov[word] = cnt
+                    cnt += 1
                 else:
-                    _o_source.append(source_oov.index(word) + self.size)
+                    _o_source.append(source_oov[word] + self.size)
                 _source.append(self.word2idx[table[word]])
         return _o_source, source_oov, _source
 
@@ -93,13 +96,14 @@ class Vocabulary:
                     _o_target.append(self.word2idx['<UNK>'])
                     _target.append(self.word2idx['<UNK>'])
                 else:
-                    _o_target.append(source_oov.index(word) + self.size)
+                    _o_target.append(source_oov[word] + self.size)
                     _target.append(self.word2idx[table[word]])
         return self.add_start_end(_o_target), self.add_start_end(_target)
 
 
 class Table2text_seq:
     def __init__(self, mode, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available()):
+        prefix = "/home/hongmin/table2text_nlg/data/dkb/"
         self.type = type
         self.vocab = None
         # self.target_vocab = None
@@ -110,25 +114,26 @@ class Table2text_seq:
         self.USE_CUDA = USE_CUDA
         if mode == 0:
             if self.type == 0:
-                path = "train_P.pkl"
+                path = "{}train_P.pkl".format(prefix)
             else:
-                path = "train_A.pkl"
+                path = "{}train_A.pkl".format(prefix)
         elif mode == 1:
             if self.type == 0:
-                path = "valid_P.pkl"
+                path = "{}valid_P.pkl".format(prefix)
             else:
-                path = "valid_A.pkl"
+                path = "{}valid_A.pkl".format(prefix)
         else:
             if self.type == 0:
-                path = "test_P.pkl"
+                path = "{}test_P.pkl".format(prefix)
             else:
-                path = "test_A.pkl"
+                path = "{}test_A.pkl".format(prefix)
         self.data = self.load_data(path)
         self.len = len(self.data)
         self.corpus = self.batchfy()
         self.device = torch.device("cuda" if USE_CUDA else "cpu")
 
     def load_data(self, path):
+        print("Loading data from {}".format(path))
         # (qkey, qitem, index)
         with open(path, 'rb') as output:
             data = pickle.load(output)
@@ -138,12 +143,14 @@ class Table2text_seq:
         samples = []
         total_field = []
         for idx, old_source in enumerate(old_sources):
+            # print("old_source: {}".format(old_source))
             source = []
             field = []
             table = {}
             p_for = []
             p_bck = []
             target = old_targets[idx]
+            # print("target: {}".format(target))
             if len(target) > self.text_len:
                 self.text_len = len(target) + 2
             for key, value, index in old_source:
@@ -159,6 +166,8 @@ class Table2text_seq:
                 p_bck.append(curr_p_max - p)
             if self.max_p < curr_p_max:
                 self.max_p = curr_p_max
+            # print("source: {}".format(source))
+            # print("field: {}".format(field))
             total.append(source + target)
             total_field.append(field)
             samples.append([source, target, field, p_for, p_bck, table])
@@ -185,6 +194,7 @@ class Table2text_seq:
         return samples
 
     def batchfy(self):
+        print("Constructing Batches ...")
         samples = [self.data[i:i+self.batch_size] for i in range(0, len(self.data), self.batch_size)]
         corpus = []
         for sample in samples:
@@ -207,6 +217,7 @@ class Table2text_seq:
         # batch_o_f --> tensor batch of field and used wordid
         # max_article_oov --> max number of OOV tokens in article batch
 
+        # print(len(sample))
         batch_o_s, batch_o_t, batch_f, batch_t, batch_s, batch_pf, batch_pb = [], [], [], [], [], [], []
         source_len, target_len, w2fs = [], [], []
         list_oovs = []
@@ -215,6 +226,7 @@ class Table2text_seq:
         fields = []
         max_source_oov = 0
         for data in sample:
+            # print("data: {}".format(data))
             source = data[0]
             target = data[1]
             field = data[2]
@@ -223,15 +235,34 @@ class Table2text_seq:
             table = data[5]
             source_len.append(len(source))
             target_len.append(len(target) + 2)
-            _o_source, source_oov, _source = self.vocab.vectorize_source(source, table)
-            # print(source_oov)
-            _o_target, _target = self.vocab.vectorize_target(target, source_oov, table)
+
             _o_fields = self.vocab.vectorize_field(field)
+            _o_source, source_oov, _source = self.vocab.vectorize_source(source, table)
+            _o_target, _target = self.vocab.vectorize_target(target, source_oov, table)
+
+            # print(source)
+            # print(target)
+            # print(field)
+            # print(p_for)
+            # print(p_bck)
+            # print(table)
+            # print(len(source))
+            # print(len(table.items()))
+            # print(_o_source)
+            # print(source_oov)
+            # print(_source)
+            # print(self.vocab.size)
+            # print(_o_target)
+            # print(_target)
+            # print(_o_fields)
+            # sys.exit(0)
+
+            source_oov = source_oov.items()
             if max_source_oov < len(source_oov):
                 max_source_oov = len(source_oov)
             if self.mode != 0:
-                oovidx2word = {idx: word for idx, word in enumerate(source_oov)}
-                w2f={(idx+self.vocab.size): self.vocab.word2idx[table[word]] for idx, word in enumerate(source_oov)}
+                oovidx2word = {idx: word for word, idx in source_oov}
+                w2f={(idx+self.vocab.size): self.vocab.word2idx[table[word]] for word, idx in source_oov}
                 w2fs.append(w2f)
                 list_oovs.append(oovidx2word)
                 targets.append(target)
@@ -250,7 +281,6 @@ class Table2text_seq:
         batch_f = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_f]
         batch_pf = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_pf]
         batch_pb = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_pb]
-
         batch_t = [torch.LongTensor(self.pad_vector(i, max(target_len))) for i in batch_t]
         batch_o_t = [torch.LongTensor(self.pad_vector(i, max(target_len))) for i in batch_o_t]
 
