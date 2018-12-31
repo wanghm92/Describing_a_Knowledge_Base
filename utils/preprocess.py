@@ -2,6 +2,7 @@ from collections import Counter, OrderedDict
 import pickle
 import json
 import argparse
+import sys
 
 prefix = "/home/hongmin/table2text_nlg/data/dkb/"
 
@@ -43,12 +44,16 @@ class Read_file:
             print("Finish dump")
 
     def prepare(self, path):
+        print(path)
         field_corpus = []
         old_targets = []
         old_table = []
+        print("Parsing tables ...")
         with open(path, 'r') as files:
             i = 0
             for line in files:
+                if i % 100 == 0:
+                    sys.stdout.write("Parsed {} lines\r".format(i))
                 temp_table = json.loads(line.strip('\n'))
                 table, target, flag, field = self.turnc_sent(temp_table)
                 if flag:
@@ -65,7 +70,11 @@ class Read_file:
         sources = []
         targets = []
         j = 0
+
+        print("Processing tables ...")
         for i, table in enumerate(old_table):
+            if i % 100 == 0:
+                sys.stdout.write("Processed {} tables\r".format(i))
             keys = [key for key in table.keys() if key in used_field and key != "Name_ID"]
             index = 1
             temp = [("Name_ID", table["Name_ID"], index)]
@@ -130,9 +139,11 @@ class Read_file:
         return final_target
 
     def turnc_sent(self, table):
+        # print(table.keys())
         values = set()
         order_values = [table["Name_ID"]]
         for key, items in table.items():
+            # print("{} --> {}\n".format(key, items))
             if key == "Name_ID" or key == "TEXT":
                 continue
             for item in items:
@@ -202,7 +213,9 @@ class Read_file:
         return newinfobox, final_sent, True, field
 
     def _dump(self, mode):
-        print(len(self.sources))
+        print("number of sources: {}".format(len(self.sources)))
+        print("number of targets: {}".format(len(self.targets)))
+        print("maxp: {}".format(self.maxp))
         if mode == 0:
             if self.type == 0:
                 path = "{}/train_P.pkl".format(prefix)
