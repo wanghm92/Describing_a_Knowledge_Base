@@ -128,11 +128,14 @@ class Table2text_seq:
             else:
                 path = "{}test_A.pkl".format(prefix)
         self.data = self.load_data(path)
+        # print(self.vocab.word2idx.keys())
+        print(self.vocab.size)
         self.len = len(self.data)
         self.corpus = self.batchfy()
         self.device = torch.device("cuda" if USE_CUDA else "cpu")
 
     def load_data(self, path):
+        prefix = "/home/hongmin/table2text_nlg/describe_kb/models"
         print("Loading data from {}".format(path))
         # (qkey, qitem, index)
         with open(path, 'rb') as output:
@@ -154,6 +157,7 @@ class Table2text_seq:
             if len(target) > self.text_len:
                 self.text_len = len(target) + 2
             for key, value, index in old_source:
+                value = value.lower()
                 # change key into special tokens
                 tag = '<'+key+'>'
                 source.append(value)
@@ -173,9 +177,9 @@ class Table2text_seq:
             samples.append([source, target, field, p_for, p_bck, table])
         samples.sort(key=lambda x: len(x[0]), reverse=True)
         if self.type == 0:
-            vocab_path = "vocab.pkl"
+            vocab_path = "{}/vocab.pkl".format(prefix)
         else:
-            vocab_path = "vocab_D.pkl"
+            vocab_path = "{}/vocab_D.pkl".format(prefix)
         if self.mode == 0:
             if self.type == 0:
                 self.vocab = Vocabulary(corpus=total, field=total_field)
@@ -311,7 +315,7 @@ class Table2text_seq:
             batch_f = batch_f.to(self.device)
             batch_pf = batch_pf.to(self.device)
             batch_pb = batch_pb.to(self.device)
-            return batch_s, batch_o_s, batch_t, batch_o_t, batch_f, batch_pf, batch_pb, source_len, max_source_oov
+            return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_t, batch_o_t, source_len, max_source_oov
         else:
             batch_s, batch_o_s, batch_f, batch_pf, batch_pb, targets, sources, fields, list_oovs, source_len, \
                 max_source_oov, w2fs = self.corpus[index]

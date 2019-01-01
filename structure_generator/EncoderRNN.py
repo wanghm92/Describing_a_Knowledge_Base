@@ -23,14 +23,14 @@ class EncoderRNN(BaseRNN):
         embed_field = self.embedding(batch_f)
         embed_pf = self.pos_embedding(batch_pf)
         embed_pb = self.pos_embedding(batch_pb)
-        embed_p = torch.cat((embed_pf, embed_pb), dim=2)
-        embed = torch.cat((embed_input, embed_field, embed_p), dim=2)
+        embed_pos = torch.cat((embed_pf, embed_pb), dim=2)
+        embed = torch.cat((embed_input, embed_field, embed_pos), dim=2)
         embed = self.input_dropout(embed)
         if self.variable_lengths:
             embedded = nn.utils.rnn.pack_padded_sequence(embed, input_lengths, batch_first=True)
-        _, hidden = self.rnn(embedded)
+        _, enc_state = self.rnn(embedded)
 
-        return embed_input, embed_field, embed_p, hidden, mask
+        return embed_input, embed_field, embed_pos, enc_state, mask
 
 
 

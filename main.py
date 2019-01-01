@@ -22,7 +22,7 @@ class Config(object):
     nlayers = 1
     lr = 0.001
     epochs = 50
-    batch_size = 64
+    batch_size = 128
     dropout = 0
     bidirectional = True
     max_grad_norm = 10
@@ -71,8 +71,8 @@ if torch.cuda.is_available():
         torch.cuda.manual_seed(args.seed)
 
 device = torch.device("cuda" if args.cuda else "cpu")
-config = Config()
-# config = ConfigTest()
+# config = Config()
+config = ConfigTest()
 
 if args.mask == 1:
     filepost = "_m"
@@ -118,10 +118,14 @@ predictor = Predictor(model, v_dataset.vocab, args.cuda)
 # -------------------------------------------------------------------------------------------------- #
 
 def train_batch(dataset, batch_idx, model, teacher_forcing_ratio):
-    batch_s, batch_o_s, batch_t, batch_o_t, batch_f, batch_pf, batch_pb, source_len, max_source_oov = \
+    batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_t, batch_o_t, source_len, max_source_oov = \
         dataset.get_batch(batch_idx)
-    losses = model(batch_s, batch_o_s, max_source_oov, batch_f, batch_pf, batch_pb, source_len, batch_t,
-                   batch_o_t, teacher_forcing_ratio)
+
+    losses = model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
+                   target=batch_t, target_id=batch_o_t,
+                   input_lengths=source_len, max_source_oov=max_source_oov,
+                   teacher_forcing_ratio=teacher_forcing_ratio)
+
     batch_loss = losses.mean()
     model.zero_grad()
     batch_loss.backward()
@@ -160,10 +164,9 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio):
         final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref)
         epoch_score = 2*final_scores['ROUGE_L']*final_scores['Bleu_4']/(final_scores['Bleu_4']+ final_scores['ROUGE_L'])
 
-        # TODO: save with epoch number
         if epoch_score > best_dev:
-            torch.save(model.state_dict(), args.save)
-            print("model saved")
+            torch.save(model.state_dict(), "{}.{}".format(args.save, epoch))
+            print("model at epoch #{} saved".format(epoch))
             best_dev = epoch_score
 
 # -------------------------------------------------------------------------------------------------- #

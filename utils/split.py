@@ -1,5 +1,6 @@
 import sys
-
+# import random
+# random.seed(1111)
 
 def get_file_list_from_dir(datadir):
     data = []
@@ -17,6 +18,7 @@ def get_file_list_from_dir(datadir):
 
 def split(file_list):
     num = len(file_list)
+    # random.shuffle(file_list)
     train = num // 10 * 8
     valid = train + (num - train) // 2
     training = file_list[:train]

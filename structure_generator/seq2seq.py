@@ -13,19 +13,24 @@ class Seq2seq(nn.Module):
         self.encoder.rnn.flatten_parameters()
         self.decoder.rnn.flatten_parameters()
 
-    def forward(self, batch_s, batch_o_s, max_source_oov, batch_f, batch_pf, batch_pb, input_lengths=None,
-                target=None, target_id=None, teacher_forcing_ratio=0, w2fs=None, fig=False):
-        encoderi, encoderf, encoderp, encoder_hidden, mask = self.encoder(batch_s, batch_f, batch_pf, batch_pb,
-                                                                          input_lengths)
+    def forward(self, batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
+                target=None, target_id=None,
+                input_lengths=None, max_source_oov=0,
+                teacher_forcing_ratio=0,
+                w2fs=None, fig=False):
+
+        # embed_input, embed_field, embed_pos, enc_state, mask
+        enc_hidden, enc_field, enc_pos, enc_state, mask = self.encoder(batch_s, batch_f, batch_pf, batch_pb, input_lengths)
+
         result = self.decoder(max_source_oov=max_source_oov,
                               targets=target,
                               targets_id=target_id,
                               input_ids=batch_o_s,
                               enc_mask=mask,
-                              encoder_hidden=encoder_hidden,
-                              encoderi=encoderi,
-                              encoderf=encoderf,
-                              encoderp=encoderp,
+                              enc_state=enc_state,
+                              enc_hidden=enc_hidden,
+                              enc_field=enc_field,
+                              enc_pos=enc_pos,
                               teacher_forcing_ratio=teacher_forcing_ratio,
                               w2fs=w2fs,
                               fig=fig)
