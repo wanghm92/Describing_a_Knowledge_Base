@@ -14,8 +14,8 @@ class Predictor(object):
 
     def predict(self, batch_s, batch_o_s, batch_f, batch_pf, batch_pb, max_source_oov, source_len, list_oovs, w2fs):
         torch.set_grad_enabled(False)
-        decoded_outputs, lengths = self.model(batch_s, batch_o_s, max_source_oov, batch_f, batch_pf, batch_pb,
-                                              source_len, w2fs=w2fs)
+        decoded_outputs, lengths = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
+                                              input_lenghts=source_len, max_source_oov=max_source_oov, w2fs=w2fs)
         length = lengths[0]
         output = []
         # print(decoded_outputs)
@@ -50,8 +50,8 @@ class Predictor(object):
         for batch_idx in range(len(dataset.corpus)):
             batch_s, batch_o_s, batch_f, batch_pf, batch_pb, sources, targets, fields, list_oovs, source_len, \
                 max_source_oov, w2fs = dataset.get_batch(batch_idx)
-            decoded_outputs, lengths = self.model(batch_s, batch_o_s, max_source_oov, batch_f, batch_pf, batch_pb,
-                                                  source_len, w2fs=w2fs)
+            decoded_outputs, lengths = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
+                                                  input_lengths=source_len, max_source_oov=max_source_oov, w2fs=w2fs)
             pos = batch_pf.tolist()
             for j in range(len(lengths)):
                 line = {}
@@ -81,8 +81,10 @@ class Predictor(object):
         cands = {}
         i = 0
         for batch_idx in range(len(dataset.corpus)):
-            batch_s, batch_o_s, batch_f, batch_pf, batch_pb, _, targets, _, list_oovs, source_len, max_source_oov, w2fs = dataset.get_batch(batch_idx)
-            decoded_outputs, lengths = self.model(batch_s, batch_o_s, max_source_oov, batch_f, batch_pf, batch_pb, source_len, w2fs=w2fs)
+            batch_s, batch_o_s, batch_f, batch_pf, batch_pb, \
+            _, targets, _, list_oovs, source_len, max_source_oov, w2fs = dataset.get_batch(batch_idx)
+            decoded_outputs, lengths = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
+                                                  input_lengths=source_len, max_source_oov=max_source_oov, w2fs=w2fs)
             for j in range(len(lengths)):
                 i += 1
                 ref = self.prepare_for_bleu(targets[j])
@@ -143,8 +145,10 @@ class Predictor(object):
     def figure(self, batch_s, batch_o_s, batch_f, batch_pf, batch_pb, max_source_oov, source_len, list_oovs, w2fs, type,
                visual):
         torch.set_grad_enabled(False)
-        decoded_outputs, lengths, self_matrix, soft = self.model(batch_s, batch_o_s, max_source_oov, batch_f, batch_pf, batch_pb,
-                                              source_len, w2fs=w2fs, fig=True)
+        decoded_outputs, lengths, self_matrix, soft = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
+                                                                 input_lengths=source_len,
+                                                                 max_source_oov=max_source_oov,
+                                                                 w2fs=w2fs, fig=True)
         length = lengths[0]
         output = []
         # print(decoded_outputs)

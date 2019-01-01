@@ -1,6 +1,6 @@
 import torch
 from collections import Counter
-import pickle, sys
+import pickle, sys, json, io
 
 
 class Vocabulary:
@@ -128,7 +128,6 @@ class Table2text_seq:
             else:
                 path = "{}test_A.pkl".format(prefix)
         self.data = self.load_data(path)
-        # print(self.vocab.word2idx.keys())
         print(self.vocab.size)
         self.len = len(self.data)
         self.corpus = self.batchfy()
@@ -153,7 +152,7 @@ class Table2text_seq:
             p_for = []
             p_bck = []
             target = old_targets[idx]
-            # print("target: {}".format(target))
+            target = [x.lower() for x in target]
             if len(target) > self.text_len:
                 self.text_len = len(target) + 2
             for key, value, index in old_source:
@@ -177,9 +176,11 @@ class Table2text_seq:
             samples.append([source, target, field, p_for, p_bck, table])
         samples.sort(key=lambda x: len(x[0]), reverse=True)
         if self.type == 0:
-            vocab_path = "{}/vocab.pkl".format(prefix)
+            vocab_path_pkl = "{}/vocab.pkl".format(prefix)
+            vocab_path_js = "{}/vocab.json".format(prefix)
         else:
-            vocab_path = "{}/vocab_D.pkl".format(prefix)
+            vocab_path_pkl = "{}/vocab_D.pkl".format(prefix)
+            vocab_path_js = "{}/vocab_D.json".format(prefix)
         if self.mode == 0:
             if self.type == 0:
                 self.vocab = Vocabulary(corpus=total, field=total_field)
@@ -189,11 +190,13 @@ class Table2text_seq:
                 "idx2word": self.vocab.idx2word,
                 "word2idx": self.vocab.word2idx
             }
-            with open(vocab_path, 'wb') as output:
-                pickle.dump(data, output)
+            with open(vocab_path_pkl, 'wb') as fout:
+                pickle.dump(data, fout)
+            with io.open(vocab_path_js, 'w', encoding='utf-8') as fout:
+                json.dump(data, fout, sort_keys=True, indent=4)
         else:
-            with open(vocab_path, 'rb') as output:
-                data = pickle.load(output)
+            with open(vocab_path_pkl, 'rb') as fout:
+                data = pickle.load(fout)
             self.vocab = Vocabulary(word2idx=data["word2idx"], idx2word=data["idx2word"])
         return samples
 

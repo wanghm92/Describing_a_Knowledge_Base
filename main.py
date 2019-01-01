@@ -71,8 +71,8 @@ if torch.cuda.is_available():
         torch.cuda.manual_seed(args.seed)
 
 device = torch.device("cuda" if args.cuda else "cpu")
-# config = Config()
-config = ConfigTest()
+config = Config()
+# config = ConfigTest()
 
 if args.mask == 1:
     filepost = "_m"
