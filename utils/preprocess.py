@@ -1,10 +1,8 @@
 from collections import Counter, OrderedDict
-import pickle
-import json
-import argparse
-import sys
+import pickle, json, argparse, sys, pprint
 
 prefix = "/home/hongmin/table2text_nlg/data/dkb/"
+pp = pprint.PrettyPrinter(indent=4)
 
 class Read_file:
     """Read table and description files"""
@@ -12,49 +10,54 @@ class Read_file:
         self.type = type
         for mode in range(3):
             self.mode = mode
+            self.num_sample = num_sample
+            self.max_len = max_len
+            self.min_freq_fields = min_freq_fields
+
             if mode == 0:
                 path = "train_"
+                self.maxp = maxp
             else:
                 num_sample /= 8
+                # load maxp from trainining set
                 if self.type == 0:
                     path = "{}/train_P.pkl".format(prefix)
                 else:
                     path = "{}/train_A.pkl".format(prefix)
                 with open(path, 'rb') as output:
                     data = pickle.load(output)
-                maxp = data["maxp"]
+                self.maxp = data["maxp"]
                 if mode == 1:
                     path = "valid_"
                 else:
                     path = "test_"
+
             if type == 0:
                 post = "wiki_P.json"
             else:
                 post = "wiki_A.json"
             table_path = prefix + path + post
-            self.maxp = maxp
-
-            self.num_sample = num_sample
-            self.max_len = max_len
-            # least common fields
-            self.min_freq_fields = min_freq_fields
             self.sources, self.targets = self.prepare(table_path)
             print("Finish read text")
+
             self._dump(mode)
             print("Finish dump")
 
+
     def prepare(self, path):
-        print(path)
+        print("Parsing tables from {}".format(path))
         field_corpus = []
         old_targets = []
         old_table = []
-        print("Parsing tables ...")
         with open(path, 'r') as files:
             i = 0
             for line in files:
                 if i % 100 == 0:
                     sys.stdout.write("Parsed {} lines\r".format(i))
                 temp_table = json.loads(line.strip('\n'))
+                # pp.pprint(temp_table)
+
+                # ----------------------- filter table values ------------------------- #
                 table, target, flag, field = self.turnc_sent(temp_table)
                 if flag:
                     old_targets.append(target)
@@ -63,19 +66,21 @@ class Read_file:
                     i += 1
                     if i == self.num_sample * 1.5:
                         break
+
+        # ----------------------- filter table fields by frequency ------------------------- #
         fields = Counter(field_corpus)
         if self.min_freq_fields:
             fields = {word: freq for word, freq in fields.items() if freq >= self.min_freq_fields}
         used_field = list(fields)
+
         sources = []
         targets = []
         j = 0
-
         print("Processing tables ...")
         for i, table in enumerate(old_table):
             if i % 100 == 0:
                 sys.stdout.write("Processed {} tables\r".format(i))
-            keys = [key for key in table.keys() if key in used_field and key != "Name_ID"]
+            keys = [key for key in table.keys() if key in used_field and key != "Name_ID"]  # filter field values
             index = 1
             temp = [("Name_ID", table["Name_ID"], index)]
             index += 1
@@ -94,29 +99,41 @@ class Read_file:
                                             temp.append((qkey, qitem, index))
                                             order_values.append(qitems)
                         index += 1
+
+            # ----------------------- keep track of maxp ------------------------- #
             if self.maxp < index:
                 if self.mode == 0:
                     self.maxp = index
                 else:
                     continue
+
+            # NOTE: discard samples with <5 fields for training
             if self.type == 0 and len(temp) < 5:
                 continue
             else:
+                # NOTE: discard samples with <3 fields for evaluation and testing
                 if len(temp) < 3:
                     continue
+
             new_sent = []
             for sent in old_targets[i]:
                 for word in order_values:
+                    # NOTE: only keep sents with table values
                     if word in sent:
                         new_sent.extend(sent)
                         break
+
             if len(new_sent) < 5:
                 continue
+
             sources.append(temp)
             j += 1
             targets.append(new_sent)
             if j == self.num_sample:
                 break
+            print(temp)
+            print(new_sent)
+            sys.exit(0)
         # pprint(sources)
         return sources, targets
 
@@ -158,21 +175,26 @@ class Read_file:
                             if qitem not in order_values:
                                 order_values.append(qitems)
         target = table["TEXT"]
+        target = self.ranksent(order_values, target)
+
         used_value = set()
         final_sent = []
         final_target = []
-        target = self.ranksent(order_values, target)
         for sent in target:
             if len(final_target) + len(sent) > self.max_len:
                 break
             else:
                 final_sent.append(sent)
                 final_target.extend(sent)
+
         for word in final_target:
             if word in values:
                 used_value.add(word)
+
+        # NOTE: samples with < 5 field values are discarded for training
         if self.type == 0 and len(used_value) < 5:
             return None, None, False, None
+
         newinfobox = OrderedDict()
         update_value = set()
         field = []
@@ -208,8 +230,11 @@ class Read_file:
                         item_list.append(new_value)
             if len(item_list) > 0:
                 newinfobox[key] = item_list
+
+        # NOTE: samples with < 5 field values are discarded for training
         if self.type == 0 and len(update_value) < 5:
             return None, None, False, None
+
         return newinfobox, final_sent, True, field
 
     def _dump(self, mode):

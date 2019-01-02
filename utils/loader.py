@@ -127,9 +127,11 @@ class Table2text_seq:
                 path = "{}test_P.pkl".format(prefix)
             else:
                 path = "{}test_A.pkl".format(prefix)
+
         self.data = self.load_data(path)
         print(self.vocab.size)
         self.len = len(self.data)
+
         self.corpus = self.batchfy()
         self.device = torch.device("cuda" if USE_CUDA else "cpu")
 
@@ -137,8 +139,8 @@ class Table2text_seq:
         prefix = "/home/hongmin/table2text_nlg/describe_kb/models"
         print("Loading data from {}".format(path))
         # (qkey, qitem, index)
-        with open(path, 'rb') as output:
-            data = pickle.load(output)
+        with open(path, 'rb') as fin:
+            data = pickle.load(fin)
         old_sources = data["source"]
         old_targets = data["target"]
         total = []
@@ -152,11 +154,11 @@ class Table2text_seq:
             p_for = []
             p_bck = []
             target = old_targets[idx]
-            target = [x.lower() for x in target]
+            target = [x.lower() for x in target]  # NOTE: changed to lowercase strings
             if len(target) > self.text_len:
                 self.text_len = len(target) + 2
             for key, value, index in old_source:
-                value = value.lower()
+                value = value.lower()  # NOTE: changed to lowercase strings
                 # change key into special tokens
                 tag = '<'+key+'>'
                 source.append(value)
