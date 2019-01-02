@@ -4,12 +4,14 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from predictor import Predictor
-from utils.loader import Table2text_seq
+# from utils.loader import Table2text_seq
+from utils.loader_wikibio import Table2text_seq
 from structure_generator.EncoderRNN import EncoderRNN
 from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq
 from eval_final import Evaluate
 from eval import Evaluate_test
+import random
 
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------------ Config ------------------------------------------------ #
@@ -22,7 +24,7 @@ class Config(object):
     nlayers = 1
     lr = 0.001
     epochs = 50
-    batch_size = 128
+    batch_size = 96
     dropout = 0
     bidirectional = True
     max_grad_norm = 10
@@ -144,7 +146,10 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio):
         model.train(True)
         torch.set_grad_enabled(True)
         epoch_loss = 0
-        for batch_idx in range(len_batch):
+
+        batch_indices = list(range(len_batch))
+        random.shuffle(batch_indices)
+        for batch_idx in batch_indices:
             loss, num_examples = train_batch(t_dataset, batch_idx, model, teacher_forcing_ratio)
             epoch_loss += loss * num_examples
             sys.stdout.write(
