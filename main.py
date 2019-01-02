@@ -4,14 +4,14 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from predictor import Predictor
-# from utils.loader import Table2text_seq
-from utils.loader_wikibio import Table2text_seq
+from utils.loader import Table2text_seq
+# from utils.loader_wikibio import Table2text_seq
 from structure_generator.EncoderRNN import EncoderRNN
 from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq
 from eval_final import Evaluate
 from eval import Evaluate_test
-import random
+import random, os
 
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------------ Config ------------------------------------------------ #
@@ -24,7 +24,7 @@ class Config(object):
     nlayers = 1
     lr = 0.001
     epochs = 50
-    batch_size = 96
+    batch_size = 256
     dropout = 0
     bidirectional = True
     max_grad_norm = 10
@@ -162,7 +162,11 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio):
         cand, ref = predictor.preeval_batch(v_dataset)
         print('Result:')
         print('ref: ', ref[1][0])
-        print('cand: ', cand[1])
+        print('cand: {}'.format(cand[1]))
+        eval_file_out = "valid.{}".format(epoch)
+        with open(eval_file_out, 'w+') as fout:
+            for c in range(len(cand)):
+                fout.write("{}\n".format(cand[c+1]))
         final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref)
         epoch_score = 2*final_scores['ROUGE_L']*final_scores['Bleu_4']/(final_scores['Bleu_4']+ final_scores['ROUGE_L'])
 
