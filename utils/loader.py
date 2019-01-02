@@ -197,8 +197,8 @@ class Table2text_seq:
             with io.open(vocab_path_js, 'w', encoding='utf-8') as fout:
                 json.dump(data, fout, sort_keys=True, indent=4)
         else:
-            with open(vocab_path_pkl, 'rb') as fout:
-                data = pickle.load(fout)
+            with open(vocab_path_pkl, 'rb') as fin:
+                data = pickle.load(fin)
             self.vocab = Vocabulary(word2idx=data["word2idx"], idx2word=data["idx2word"])
         return samples
 
@@ -216,15 +216,17 @@ class Table2text_seq:
         return vector
 
     def vectorize(self, sample):
-        # batch_s--> tensor batch of table with ids
-        # batch_o_s --> tensor batch of table with ids and <unk> replaced by temp OOV ids
-        # batch_t--> tensor batch of text with ids
-        # batch_o_t --> tensor batch of target and <unk> replaced by temp OOV ids
-        # batch_f--> tensor batch of field with ids(might not exist)
-        # batch_pf--> tensor batch of forward position
-        # batch_pb--> tensor batch of backward position
-        # batch_o_f --> tensor batch of field and used wordid
-        # max_article_oov --> max number of OOV tokens in article batch
+        """
+            batch_s         --> tensor batch of table with ids
+            batch_o_s       --> tensor batch of table with ids and <unk> replaced by temp OOV ids
+            batch_t         --> tensor batch of text with ids
+            batch_o_t       --> tensor batch of target and <unk> replaced by temp OOV ids
+            batch_f         --> tensor batch of field with ids(might not exist)
+            batch_pf        --> tensor batch of forward position
+            batch_pb        --> tensor batch of backward position
+            batch_o_f       --> tensor batch of field and used wordid
+            max_article_oov --> max number of OOV tokens in article batch
+        """
 
         # print(len(sample))
         batch_o_s, batch_o_t, batch_f, batch_t, batch_s, batch_pf, batch_pb = [], [], [], [], [], [], []
@@ -248,23 +250,6 @@ class Table2text_seq:
             _o_fields = self.vocab.vectorize_field(field)
             _o_source, source_oov, _source = self.vocab.vectorize_source(source, table)
             _o_target, _target = self.vocab.vectorize_target(target, source_oov, table)
-
-            # print(source)
-            # print(target)
-            # print(field)
-            # print(p_for)
-            # print(p_bck)
-            # print(table)
-            # print(len(source))
-            # print(len(table.items()))
-            # print(_o_source)
-            # print(source_oov)
-            # print(_source)
-            # print(self.vocab.size)
-            # print(_o_target)
-            # print(_target)
-            # print(_o_fields)
-            # sys.exit(0)
 
             source_oov = source_oov.items()
             if max_source_oov < len(source_oov):
