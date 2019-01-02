@@ -149,13 +149,10 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio):
 
         batch_indices = list(range(len_batch))
         random.shuffle(batch_indices)
-        for batch_idx in batch_indices:
+        for idx, batch_idx in enumerate(batch_indices):
             loss, num_examples = train_batch(t_dataset, batch_idx, model, teacher_forcing_ratio)
             epoch_loss += loss * num_examples
-            sys.stdout.write(
-                '%d batches trained. current batch loss: %f\r' %
-                (batch_idx, loss)
-            )
+            sys.stdout.write('%d batches trained. current batch loss: %f\r' % (idx, loss))
             sys.stdout.flush()
         epoch_loss /= epoch_examples_total
         log_msg = "Finished epoch %d with losses: %.4f" % (epoch, epoch_loss)
