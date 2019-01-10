@@ -89,33 +89,6 @@ else:
     filepost += "_P.txt"
 
 # -------------------------------------------------------------------------------------------------- #
-# ------------------------------------- Reading Datasets ------------------------------------------- #
-# -------------------------------------------------------------------------------------------------- #
-# TODO: do not need to load training data when predicting
-print("Reading training data ...")
-t_dataset = Table2text_seq(0, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
-print("Reading valid data ...")
-v_dataset = Table2text_seq(1, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
-print("number of training examples: %d" % t_dataset.len)
-
-# -------------------------------------------------------------------------------------------------- #
-# -------------------------------------- Building Model -------------------------------------------- #
-# -------------------------------------------------------------------------------------------------- #
-
-embedding = nn.Embedding(t_dataset.vocab.size, config.emsize, padding_idx=0)
-encoder = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, hidden_size=config.emsize,
-                     pos_size=t_dataset.max_p, pemsize=config.pemsize,
-                     input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers,
-                     bidirectional=config.bidirectional, rnn_cell=config.cell, variable_lengths=True)
-decoder = DecoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, embed_size=config.emsize,
-                     pemsize=config.pemsize, sos_id=3, eos_id=2, unk_id=1,
-                     n_layers=config.nlayers, rnn_cell=config.cell, bidirectional=config.bidirectional,
-                     input_dropout_p=config.dropout, dropout_p=config.dropout, USE_CUDA=args.cuda, mask=args.mask)
-model = Seq2seq(encoder, decoder).to(device)
-optimizer = optim.Adam(model.parameters(), lr=config.lr)
-predictor = Predictor(model, v_dataset.vocab, args.cuda)
-
-# -------------------------------------------------------------------------------------------------- #
 # ------------------------------------ Training Functions ------------------------------------------ #
 # -------------------------------------------------------------------------------------------------- #
 
@@ -181,9 +154,36 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio):
 
 if __name__ == "__main__":
 
+    # -------------------------------------------------------------------------------------------------- #
+    # ------------------------------------- Reading Datasets ------------------------------------------- #
+    # -------------------------------------------------------------------------------------------------- #
+    print("Reading training data ...")
+    t_dataset = Table2text_seq('train', type=args.type, USE_CUDA=args.cuda,
+                               batch_size=config.batch_size, train_mode=args.mode)
+
+    # -------------------------------------------------------------------------------------------------- #
+    # -------------------------------------- Building Model -------------------------------------------- #
+    # -------------------------------------------------------------------------------------------------- #
+
+    embedding = nn.Embedding(t_dataset.vocab.size, config.emsize, padding_idx=0)
+    encoder = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, hidden_size=config.emsize,
+                         pos_size=t_dataset.max_p, pemsize=config.pemsize,
+                         input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers,
+                         bidirectional=config.bidirectional, rnn_cell=config.cell, variable_lengths=True)
+    decoder = DecoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, embed_size=config.emsize,
+                         pemsize=config.pemsize, sos_id=3, eos_id=2, unk_id=1,
+                         n_layers=config.nlayers, rnn_cell=config.cell, bidirectional=config.bidirectional,
+                         input_dropout_p=config.dropout, dropout_p=config.dropout, USE_CUDA=args.cuda,
+                         mask=args.mask)
+    model = Seq2seq(encoder, decoder).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=config.lr)
+
     # --------------------------------------- train -------------------------------------------- #
     if args.mode == 0:
         try:
+            print("number of training examples: %d" % t_dataset.len)
+            print("Reading valid data ...")
+            v_dataset = Table2text_seq('valid', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
             print("start training...")
             train_epoches(t_dataset, v_dataset, model, config.epochs, 1)
         except KeyboardInterrupt:
@@ -194,7 +194,7 @@ if __name__ == "__main__":
     elif args.mode == 1:
         model.load_state_dict(torch.load(args.save))
         print("model restored")
-        dataset = Table2text_seq(2, type=args.type, USE_CUDA=args.cuda, batch_size=1)
+        dataset = Table2text_seq('test', type=args.type, USE_CUDA=args.cuda, batch_size=1)
         print("Read test data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
         while True:
@@ -221,7 +221,7 @@ if __name__ == "__main__":
     elif args.mode == 2:
         model.load_state_dict(torch.load(args.save))
         print("model restored")
-        dataset = Table2text_seq(2, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
+        dataset = Table2text_seq('test', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
         print("Read test data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
         print("number of test examples: %d" % dataset.len)
@@ -236,7 +236,7 @@ if __name__ == "__main__":
     elif args.mode == 3:
         model.load_state_dict(torch.load(args.save))
         print("model restored")
-        dataset = Table2text_seq(2, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
+        dataset = Table2text_seq('test', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
         print("Read test data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
         print("number of test examples: %d" % dataset.len)
@@ -257,14 +257,16 @@ if __name__ == "__main__":
         # load and keep training
         model.load_state_dict(torch.load(args.save))
         print("model restored")
-        # train
         try:
+            print("number of training examples: %d" % t_dataset.len)
+            print("Reading valid data ...")
+            v_dataset = Table2text_seq('valid', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
             print("start training...")
             train_epoches(t_dataset, v_dataset, model, 1, 1)
         except KeyboardInterrupt:
             print('-' * 89)
             print('Exiting from training early')
-        dataset = Table2text_seq(2, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
+        dataset = Table2text_seq('test', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
         print("Read test data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
         print("number of test examples: %d" % dataset.len)

@@ -104,38 +104,70 @@ class Vocabulary:
 
 
 class Table2text_seq:
-    def __init__(self, mode, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available()):
+    def __init__(self, data_src, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available(), train_mode=0):
         prefix = "{}/table2text_nlg/data/dkb/".format(HOME)
         self.type = type
         self.vocab = None
         # self.target_vocab = None
         self.text_len = 0
         self.max_p = 0
-        self.mode = mode
+        self.data_src = data_src
         self.batch_size = batch_size
         self.USE_CUDA = USE_CUDA
-        if mode == 0:
+        self.device = torch.device("cuda" if USE_CUDA else "cpu")
+
+        if data_src == 'train':
             if self.type == 0:
                 path = "{}train_P.pkl".format(prefix)
             else:
                 path = "{}train_A.pkl".format(prefix)
-        elif mode == 1:
+        elif data_src == 'valid':
             if self.type == 0:
                 path = "{}valid_P.pkl".format(prefix)
             else:
                 path = "{}valid_A.pkl".format(prefix)
-        else:
+        elif data_src == 'test':
             if self.type == 0:
                 path = "{}test_P.pkl".format(prefix)
             else:
                 path = "{}test_A.pkl".format(prefix)
+        else:
+            raise ValueError("Only train, valid, test data_src are supported")
 
-        self.data = self.load_data(path)
+        if data_src == 'train' and (train_mode != 0 or train_mode != 4):  # training(0) and resume training(4)
+            self.data = self.load_data_light(path)
+        else:
+            self.data = self.load_data(path)
+            self.len = len(self.data)
+            self.corpus = self.batchfy()
+
         print(self.vocab.size)
-        self.len = len(self.data)
 
-        self.corpus = self.batchfy()
-        self.device = torch.device("cuda" if USE_CUDA else "cpu")
+    def load_data_light(self, path):
+        print("Loading data $LIGHT$ from {}".format(path))
+        prefix = "{}/table2text_nlg/describe_kb/models".format(HOME)
+        if self.type == 0:
+            vocab_path_pkl = "{}/wikibio_vocab.pkl".format(prefix)
+        else:
+            vocab_path_pkl = "{}/wikibio_vocab_D.pkl".format(prefix)
+        print("loading vocab ...")
+        with open(vocab_path_pkl, 'rb') as fin:
+            data = pickle.load(fin)
+        self.vocab = Vocabulary(word2idx=data["word2idx"], idx2word=data["idx2word"])
+
+        print("Loading data from {}".format(path))
+        # (qkey, qitem, index)
+        with open(path, 'rb') as fin:
+            data = pickle.load(fin)
+        old_sources = data["source"]
+        print("{} samples to be processed".format(len(old_sources)))
+        for idx, old_source in enumerate(tqdm(old_sources)):
+            p_for = []
+            for key, value, pos, rpos in old_source:
+                p_for.append(pos)
+            curr_p_max = max(p_for) + 1
+            if self.max_p < curr_p_max:
+                self.max_p = curr_p_max
 
     def load_data(self, path):
         prefix = "{}/table2text_nlg/describe_kb/models".format(HOME)
@@ -187,7 +219,7 @@ class Table2text_seq:
         else:
             vocab_path_pkl = "{}/vocab_D.pkl".format(prefix)
             vocab_path_js = "{}/vocab_D.json".format(prefix)
-        if self.mode == 0:
+        if self.data_src == 'train':
             if self.type == 0:
                 self.vocab = Vocabulary(corpus=total, field=total_field)
             else:
@@ -258,7 +290,7 @@ class Table2text_seq:
             source_oov = source_oov.items()
             if max_source_oov < len(source_oov):
                 max_source_oov = len(source_oov)
-            if self.mode != 0:
+            if self.data_src != 'train':
                 oovidx2word = {idx: word for word, idx in source_oov}
                 w2f={(idx+self.vocab.size): self.vocab.word2idx[table[word]] for word, idx in source_oov}
                 w2fs.append(w2f)
@@ -289,7 +321,7 @@ class Table2text_seq:
         batch_t = torch.stack(batch_t, dim=0)
         batch_s = torch.stack(batch_s, dim=0)
         batch_o_t = torch.stack(batch_o_t, dim=0)
-        if self.mode != 0:
+        if self.data_src != 'train':
             targets= [i[:max(target_len)-2] for i in targets]
             sources= [i[:max(source_len)] for i in sources]
             fields = [i[:max(source_len)] for i in fields]
@@ -299,7 +331,7 @@ class Table2text_seq:
             return batch_s, batch_o_s, batch_t, batch_o_t, batch_f, batch_pf, batch_pb, source_len, max_source_oov
 
     def get_batch(self, index):
-        if self.mode == 0:
+        if self.data_src == 'train':
             batch_s, batch_o_s, batch_t, batch_o_t, batch_f, batch_pf, batch_pb, source_len, max_source_oov \
                 = self.corpus[index]
             batch_s = batch_s.to(self.device)

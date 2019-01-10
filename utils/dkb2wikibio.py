@@ -51,34 +51,36 @@ class Vocabulary:
         self.field_vocab = field_vocab.keys()
 
 class Table2text_seq:
-    def __init__(self, mode, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available()):
+    def __init__(self, data_src, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available()):
         input_path = "{}/table2text_nlg/data/dkb/".format(HOME)
         self.type = type
         self.vocab = None
         # self.target_vocab = None
         self.text_len = 0
         self.max_p = 0
-        self.mode = mode
+        self.data_src = data_src
         self.batch_size = batch_size
         self.USE_CUDA = USE_CUDA
-        if mode == 0:
+        if data_src == 'train':
             if self.type == 0:
                 path = "{}train_P.pkl".format(input_path)
             else:
                 path = "{}train_A.pkl".format(input_path)
-        elif mode == 1:
+        elif data_src == 'valid':
             if self.type == 0:
                 path = "{}valid_P.pkl".format(input_path)
             else:
                 path = "{}valid_A.pkl".format(input_path)
-        else:
+        elif data_src == 'test':
             if self.type == 0:
                 path = "{}test_P.pkl".format(input_path)
             else:
                 path = "{}test_A.pkl".format(input_path)
+        else:
+            raise ValueError("Only train, valid, test data_src are supported")
 
         self.data = self.load_data(path)
-        if self.mode == 0:
+        if self.data_src == 'train':
             print(len(self.vocab.vocabulary))
             print(len(self.vocab.field_vocab))
         self.len = len(self.data)
@@ -126,7 +128,7 @@ class Table2text_seq:
         print("sorting samples ...")
         samples.sort(key=lambda x: len(x[0]), reverse=True)
 
-        if self.mode == 0:
+        if self.data_src == 'train':
             print("saving vocab ...")
             word_vocab_path = "{}/word_vocab.txt".format(output_path)
             field_vocab_path = "{}/field_vocab.txt".format(output_path)
@@ -163,18 +165,18 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     print("Converting training data ...")
-    train_dataset = Table2text_seq(0, type=args.type)
+    train_dataset = Table2text_seq('train', type=args.type)
     print("number of training examples: %d" % train_dataset.len)
     dump_dataset(train_dataset, output_path+'/train')
 
     print("Converting valid data ...")
-    v_dataset = Table2text_seq(1, type=args.type)
+    v_dataset = Table2text_seq('valid', type=args.type)
     print("number of valid examples: %d" % v_dataset.len)
     dump_dataset(v_dataset, output_path+'/valid')
 
 
     print("Converting test data ...")
-    test_dataset = Table2text_seq(2, type=args.type)
+    test_dataset = Table2text_seq('test', type=args.type)
     print("number of test examples: %d" % test_dataset.len)
     dump_dataset(v_dataset, output_path+'/test')
 
