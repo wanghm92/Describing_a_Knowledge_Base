@@ -91,7 +91,7 @@ else:
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------- Reading Datasets ------------------------------------------- #
 # -------------------------------------------------------------------------------------------------- #
-
+# TODO: do not need to load training data when predicting
 print("Reading training data ...")
 t_dataset = Table2text_seq(0, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
 print("Reading valid data ...")

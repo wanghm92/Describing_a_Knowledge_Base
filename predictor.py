@@ -1,4 +1,5 @@
 import torch
+import sys
 import matplotlib.pyplot as plt
 plt.switch_backend('Agg')  #TkAgg
 import matplotlib.ticker as ticker
@@ -80,7 +81,9 @@ class Predictor(object):
         refs = {}
         cands = {}
         i = 0
-        for batch_idx in range(len(dataset.corpus)):
+        total_batches = len(dataset.corpus)
+        print("{} batches to be evaluated".format(total_batches))
+        for batch_idx in range(total_batches):
             batch_s, batch_o_s, batch_f, batch_pf, batch_pb, \
             _, targets, _, list_oovs, source_len, max_source_oov, w2fs = dataset.get_batch(batch_idx)
             decoded_outputs, lengths = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
@@ -101,6 +104,8 @@ class Predictor(object):
 
                 # if i % 2500 == 0:
                 #     print("Percentages:  %.4f" % (i/float(dataset.len)))
+            sys.stdout.write('%d batches evaluated\r' % batch_idx)
+            sys.stdout.flush()
         return cands, refs
 
     def prepare_for_bleu(self, sentence):
