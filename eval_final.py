@@ -6,7 +6,7 @@ import sys
 sys.path.append('pycocoevalcap')
 from pycocoevalcap.bleu.bleu import Bleu
 from pycocoevalcap.rouge.rouge import Rouge
-from pycocoevalcap.meteor.meteor import Meteor
+# from pycocoevalcap.meteor.meteor import Meteor
 # from pycocoevalcap.cider.cider import Cider
 
 class Evaluate(object):
@@ -14,7 +14,7 @@ class Evaluate(object):
         self.scorers = [
             (Bleu(4), ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4"]),
             (Rouge(), "ROUGE_L"),
-            (Meteor(), "METEOR")
+            # (Meteor(), "METEOR")
         ]#,        (Cider(), "CIDEr")
 
     def convert(self, data):
@@ -73,7 +73,7 @@ class Evaluate(object):
         print ('Bleu_3:\t', final_scores['Bleu_3'])
         print ('Bleu_4:\t', final_scores['Bleu_4'])
         print ('ROUGE_L:', final_scores['ROUGE_L'])
-        print ('METEOR:\t', final_scores['METEOR'])
+        # print ('METEOR:\t', final_scores['METEOR'])
         #print ('CIDEr:\t', final_scores['CIDEr'])
         #"""
 

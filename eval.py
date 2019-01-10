@@ -69,8 +69,8 @@ class Evaluate_test(object):
         # print ('Bleu_2:\t', final_scores['Bleu_2'])
         # print ('Bleu_3:\t', final_scores['Bleu_3'])
         print ('Bleu_4:\t', final_scores['Bleu_4'])
-        # print ('METEOR:\t', final_scores['METEOR'])
         print ('ROUGE_L:', final_scores['ROUGE_L'])
+        # print ('METEOR:\t', final_scores['METEOR'])
         # print ('CIDEr:\t', final_scores['CIDEr'])
         # """
 

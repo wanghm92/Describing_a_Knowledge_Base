@@ -244,7 +244,7 @@ if __name__ == "__main__":
         print("Start Evaluating")
         cand, ref = predictor.preeval_batch(dataset)
         scores = []
-        fields = ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4", "METEOR", "ROUGE_L"]
+        fields = ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4", "ROUGE_L"]  # "METEOR"
         final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref)
 
         f_out = open("score" + filepost, 'w')
@@ -272,7 +272,7 @@ if __name__ == "__main__":
         print("Start Evaluating")
         cand, ref = predictor.preeval_batch(dataset)
         scores = []
-        fields = ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4", "METEOR", "ROUGE_L"]
+        fields = ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4", "ROUGE_L"]  # "METEOR"
         final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref)
         x = input('Save (1) or not')
         if x == '1':
