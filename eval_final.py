@@ -7,14 +7,14 @@ sys.path.append('pycocoevalcap')
 from pycocoevalcap.bleu.bleu import Bleu
 from pycocoevalcap.rouge.rouge import Rouge
 from pycocoevalcap.meteor.meteor import Meteor
-#from pycocoevalcap.cider.cider import Cider
+# from pycocoevalcap.cider.cider import Cider
 
 class Evaluate(object):
     def __init__(self):
         self.scorers = [
             (Bleu(4), ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4"]),
-            (Meteor(), "METEOR"),
-            (Rouge(), "ROUGE_L")
+            (Rouge(), "ROUGE_L"),
+            (Meteor(), "METEOR")
         ]#,        (Cider(), "CIDEr")
 
     def convert(self, data):
@@ -30,6 +30,7 @@ class Evaluate(object):
     def score(self, ref, hypo):
         final_scores = {}
         for scorer, method in self.scorers:
+            print("Metric: {}".format(method))
             score, scores = scorer.compute_score(ref, hypo)
             if type(score) == list:
                 for m, s in zip(method, score):
@@ -63,6 +64,7 @@ class Evaluate(object):
             i += 1
 
         # compute scores
+        print("Computing Scores ...")
         final_scores = self.score(ref, hypo)
         #"""
         # print out scores
@@ -70,8 +72,8 @@ class Evaluate(object):
         print ('Bleu_2:\t', final_scores['Bleu_2'])
         print ('Bleu_3:\t', final_scores['Bleu_3'])
         print ('Bleu_4:\t', final_scores['Bleu_4'])
-        print ('METEOR:\t', final_scores['METEOR'])
         print ('ROUGE_L:', final_scores['ROUGE_L'])
+        print ('METEOR:\t', final_scores['METEOR'])
         #print ('CIDEr:\t', final_scores['CIDEr'])
         #"""
 
