@@ -30,6 +30,8 @@ class EncoderRNN(BaseRNN):
             embedded = nn.utils.rnn.pack_padded_sequence(embed, input_lengths, batch_first=True)
         enc_hidden, enc_state = self.rnn(embedded)
 
+        # TODO: use encoder hidden states to run baseline models for seq2seq+att (bahdanau)
+
         return embed_input, embed_field, embed_pos, enc_state, mask
 
 

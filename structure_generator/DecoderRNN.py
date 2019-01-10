@@ -124,6 +124,9 @@ class DecoderRNN(BaseRNN):
             coverage = coverage.cuda()
 
         enc_hidden_proj = self.We(enc_hidden.view(batch_size*max_enc_len, -1)).view(batch_size, max_enc_len, -1)
+
+        # TODO: add flag for optional field encodings to run pointer-generator baseline
+
         enc_field_proj = self.Wf(enc_field.view(batch_size*max_enc_len, -1)).view(batch_size, max_enc_len, -1)
         enc_proj = enc_hidden_proj + enc_field_proj
 
