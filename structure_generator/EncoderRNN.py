@@ -28,7 +28,7 @@ class EncoderRNN(BaseRNN):
         embed = self.input_dropout(embed)
         if self.variable_lengths:
             embedded = nn.utils.rnn.pack_padded_sequence(embed, input_lengths, batch_first=True)
-        _, enc_state = self.rnn(embedded)
+        enc_hidden, enc_state = self.rnn(embedded)
 
         return embed_input, embed_field, embed_pos, enc_state, mask
 
