@@ -1,7 +1,8 @@
 import torch
 from collections import Counter
 import pickle, sys, json, io, argparse
-
+from os.path import expanduser
+HOME = expanduser("~")
 
 class Vocabulary:
     """Vocabulary class for mapping between words and ids"""
@@ -45,7 +46,7 @@ class Vocabulary:
 
 class Table2text_seq:
     def __init__(self, mode, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available()):
-        prefix = "/home/hongmin/table2text_nlg/data/dkb/"
+        prefix = "{}/table2text_nlg/data/dkb/".format(HOME)
         self.type = type
         self.vocab = None
         # self.target_vocab = None
@@ -78,7 +79,7 @@ class Table2text_seq:
         print(self.len)
 
     def load_data(self, path):
-        prefix = "/home/hongmin/table2text_nlg/describe_kb/models"
+        prefix = "{}/table2text_nlg/describe_kb/models".format(HOME)
         print("Loading data from {}".format(path))
         # (qkey, qitem, index)
         with open(path, 'rb') as fin:
@@ -152,7 +153,7 @@ if __name__ == "__main__":
                         help='person(0)/animal(1)')
     args = parser.parse_args()
 
-    output_path = "/home/hongmin/table2text_nlg/describe_kb/models/"
+    output_path = "{}/table2text_nlg/describe_kb/models/".format(HOME)
 
     print("Converting training data ...")
     train_dataset = Table2text_seq(0, type=args.type)

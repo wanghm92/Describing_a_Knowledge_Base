@@ -1,7 +1,8 @@
 from collections import Counter, OrderedDict
 import pickle, json, argparse, sys, pprint
-
-prefix = "/home/hongmin/table2text_nlg/data/dkb/"
+from os.path import expanduser
+HOME = expanduser("~")
+prefix = "{}/table2text_nlg/data/dkb/".format(HOME)
 pp = pprint.PrettyPrinter(indent=4)
 
 class Read_file:

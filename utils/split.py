@@ -1,6 +1,6 @@
 import sys
-# import random
-# random.seed(1111)
+from os.path import expanduser
+HOME = expanduser("~")
 
 def get_file_list_from_dir(datadir):
     data = []
@@ -35,7 +35,7 @@ def write_files(filename, data):
 
 
 if __name__ == "__main__":
-    path = '/home/hongmin/table2text_nlg/data/dkb/'
+    path = '{}/table2text_nlg/data/dkb/'.format(HOME)
 
     train, valid, test = split(get_file_list_from_dir(path + 'wiki_animal.json'))
     filename = path + 'train_wiki_A.json'
