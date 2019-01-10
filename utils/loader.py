@@ -3,6 +3,7 @@ from collections import Counter
 import pickle, sys, json, io
 from os.path import expanduser
 HOME = expanduser("~")
+from tqdm import tqdm
 
 class Vocabulary:
     """Vocabulary class for mapping between words and ids"""
@@ -147,7 +148,9 @@ class Table2text_seq:
         total = []
         samples = []
         total_field = []
-        for idx, old_source in enumerate(old_sources):
+
+        print("{} samples to be processed".format(len(old_sources)))
+        for idx, old_source in enumerate(tqdm(old_sources)):
             # print("old_source: {}".format(old_source))
             source = []
             field = []
@@ -207,7 +210,7 @@ class Table2text_seq:
         print("Constructing Batches ...")
         samples = [self.data[i:i+self.batch_size] for i in range(0, len(self.data), self.batch_size)]
         corpus = []
-        for sample in samples:
+        for sample in tqdm(samples):
             corpus.append(self.vectorize(sample))
         return corpus
 

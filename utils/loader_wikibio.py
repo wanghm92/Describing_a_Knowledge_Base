@@ -3,6 +3,7 @@ from collections import Counter
 import pickle, sys, json, io
 from os.path import expanduser
 HOME = expanduser("~")
+from tqdm import tqdm
 
 class Vocabulary:
     """Vocabulary class for mapping between words and ids"""
@@ -110,7 +111,7 @@ class Vocabulary:
 
 class Table2text_seq:
     def __init__(self, mode, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available()):
-        prefix = "{}/table2text_nlg/data/dkb/wikibio/".format(HOME)
+        prefix = "{}/table2text_nlg/data/dkb/wikibio_dataset/".format(HOME)
         self.type = type
         self.vocab = None
         # self.target_vocab = None
@@ -153,7 +154,9 @@ class Table2text_seq:
         total = []
         samples = []
         total_field = []
-        for idx, old_source in enumerate(old_sources):
+
+        print("{} samples to be processed".format(len(old_sources)))
+        for idx, old_source in enumerate(tqdm(old_sources)):
             # print("old_source: {}".format(old_source))
             source = []
             field = []
@@ -184,7 +187,10 @@ class Table2text_seq:
             total.append(source + target)
             total_field.append(field)
             samples.append([source, target, field, p_for, p_bck, table])
+
+        print("sorting samples ...")
         samples.sort(key=lambda x: len(x[0]), reverse=True)
+
         if self.type == 0:
             vocab_path_pkl = "{}/wikibio_vocab.pkl".format(prefix)
             vocab_path_js = "{}/wikibio_vocab.json".format(prefix)
@@ -192,6 +198,7 @@ class Table2text_seq:
             vocab_path_pkl = "{}/wikibio_vocab_D.pkl".format(prefix)
             vocab_path_js = "{}/wikibio_vocab_D.json".format(prefix)
         if self.mode == 0:
+            print("saving vocab ...")
             if self.type == 0:
                 self.vocab = Vocabulary(corpus=total, field=total_field)
             else:
@@ -205,6 +212,7 @@ class Table2text_seq:
             with io.open(vocab_path_js, 'w', encoding='utf-8') as fout:
                 json.dump(data, fout, sort_keys=True, indent=4)
         else:
+            print("loading vocab ...")
             with open(vocab_path_pkl, 'rb') as fin:
                 data = pickle.load(fin)
             self.vocab = Vocabulary(word2idx=data["word2idx"], idx2word=data["idx2word"])
@@ -214,7 +222,7 @@ class Table2text_seq:
         print("Constructing Batches ...")
         samples = [self.data[i:i+self.batch_size] for i in range(0, len(self.data), self.batch_size)]
         corpus = []
-        for sample in samples:
+        for sample in tqdm(samples):
             corpus.append(self.vectorize(sample))
         return corpus
 

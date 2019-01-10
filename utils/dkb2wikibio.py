@@ -3,6 +3,12 @@ from collections import Counter
 import pickle, sys, json, io, argparse
 from os.path import expanduser
 HOME = expanduser("~")
+import spacy
+from spacy.lang.en import English
+nlp = spacy.load('en', disable=['tagger', 'parser', 'ner'])
+tokenizer = English().Defaults.create_tokenizer(nlp)
+output_path = "{}/table2text_nlg/data/dkb/wikibio_format_tokenized".format(HOME)
+from tqdm import tqdm
 
 class Vocabulary:
     """Vocabulary class for mapping between words and ids"""
@@ -46,7 +52,7 @@ class Vocabulary:
 
 class Table2text_seq:
     def __init__(self, mode, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available()):
-        prefix = "{}/table2text_nlg/data/dkb/".format(HOME)
+        input_path = "{}/table2text_nlg/data/dkb/".format(HOME)
         self.type = type
         self.vocab = None
         # self.target_vocab = None
@@ -57,19 +63,19 @@ class Table2text_seq:
         self.USE_CUDA = USE_CUDA
         if mode == 0:
             if self.type == 0:
-                path = "{}train_P.pkl".format(prefix)
+                path = "{}train_P.pkl".format(input_path)
             else:
-                path = "{}train_A.pkl".format(prefix)
+                path = "{}train_A.pkl".format(input_path)
         elif mode == 1:
             if self.type == 0:
-                path = "{}valid_P.pkl".format(prefix)
+                path = "{}valid_P.pkl".format(input_path)
             else:
-                path = "{}valid_A.pkl".format(prefix)
+                path = "{}valid_A.pkl".format(input_path)
         else:
             if self.type == 0:
-                path = "{}test_P.pkl".format(prefix)
+                path = "{}test_P.pkl".format(input_path)
             else:
-                path = "{}test_A.pkl".format(prefix)
+                path = "{}test_A.pkl".format(input_path)
 
         self.data = self.load_data(path)
         if self.mode == 0:
@@ -79,7 +85,6 @@ class Table2text_seq:
         print(self.len)
 
     def load_data(self, path):
-        prefix = "{}/table2text_nlg/describe_kb/models".format(HOME)
         print("Loading data from {}".format(path))
         # (qkey, qitem, index)
         with open(path, 'rb') as fin:
@@ -89,18 +94,19 @@ class Table2text_seq:
         total = []
         samples = []
         total_field = []
-        for idx, old_source in enumerate(old_sources):
-            # print("old_source: {}".format(old_source))
+
+        print("{} samples to be processed".format(len(old_sources)))
+        for idx, old_source in enumerate(tqdm(old_sources)):
             source = []
             field = []
             p_for = []
             p_bck = []
             target = old_targets[idx]
-            target = ' '.join(target).lower().split()  # NOTE: changed to lowercase strings
+            target = [str(x) for x in tokenizer(' '.join(target).lower())]  # NOTE: changed to lowercase strings
             if len(target) > self.text_len:
                 self.text_len = len(target) + 2
             for key, value, index in old_source:
-                value = value.lower().split()  # NOTE: changed to lowercase strings
+                value = [str(x) for x in tokenizer(value.lower())]  # NOTE: changed to lowercase strings
                 source.extend(value)
                 tag = '<{}>'.format('_'.join(key.split()))  # change key into special tokens
                 field.extend([tag for _ in range(len(value))])
@@ -116,11 +122,14 @@ class Table2text_seq:
             total.append(source + target)
             total_field.append(field)
             samples.append([source, target, field, p_for, p_bck])
+
+        print("sorting samples ...")
         samples.sort(key=lambda x: len(x[0]), reverse=True)
 
         if self.mode == 0:
-            word_vocab_path = "{}/word_vocab.txt".format(prefix)
-            field_vocab_path = "{}/field_vocab.txt".format(prefix)
+            print("saving vocab ...")
+            word_vocab_path = "{}/word_vocab.txt".format(output_path)
+            field_vocab_path = "{}/field_vocab.txt".format(output_path)
             self.vocab = Vocabulary(corpus=total, field=total_field)
             with open(word_vocab_path, 'w+') as fout:
                 for x in self.vocab.vocabulary:
@@ -134,7 +143,7 @@ class Table2text_seq:
 
 def dump_dataset(dataset, prefix):
     data = dataset.data
-    print(len(data))
+    print("dumping {} samples".format(len(data)))
     box_path = "{}.box".format(prefix)
     summary_path = "{}.summary".format(prefix)
 
@@ -152,22 +161,20 @@ if __name__ == "__main__":
     parser.add_argument('--type', type=int, default=0,
                         help='person(0)/animal(1)')
     args = parser.parse_args()
-
-    output_path = "{}/table2text_nlg/describe_kb/models/".format(HOME)
-
+    
     print("Converting training data ...")
     train_dataset = Table2text_seq(0, type=args.type)
     print("number of training examples: %d" % train_dataset.len)
-    dump_dataset(train_dataset, output_path+'train')
+    dump_dataset(train_dataset, output_path+'/train')
 
     print("Converting valid data ...")
     v_dataset = Table2text_seq(1, type=args.type)
     print("number of valid examples: %d" % v_dataset.len)
-    dump_dataset(v_dataset, output_path+'valid')
+    dump_dataset(v_dataset, output_path+'/valid')
 
 
     print("Converting test data ...")
     test_dataset = Table2text_seq(2, type=args.type)
     print("number of test examples: %d" % test_dataset.len)
-    dump_dataset(v_dataset, output_path+'test')
+    dump_dataset(v_dataset, output_path+'/test')
 

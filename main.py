@@ -4,8 +4,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from predictor import Predictor
-from utils.loader import Table2text_seq
-# from utils.loader_wikibio import Table2text_seq
+# from utils.loader import Table2text_seq
+from utils.loader_wikibio import Table2text_seq
 from structure_generator.EncoderRNN import EncoderRNN
 from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq

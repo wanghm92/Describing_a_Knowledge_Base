@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 plt.switch_backend('Agg')  #TkAgg
 import matplotlib.ticker as ticker
 from matplotlib.backends.backend_pdf import PdfPages
+from tqdm import tqdm
 
 class Predictor(object):
     def __init__(self, model, vocab, USE_CUDA):
@@ -46,9 +47,10 @@ class Predictor(object):
 
     def predict_file(self, dataset):
         torch.set_grad_enabled(False)
-        i = 0
         lines = []
-        for batch_idx in range(len(dataset.corpus)):
+        total_batches = len(dataset.corpus)
+        print("{} batches to be evaluated".format(total_batches))
+        for batch_idx in tqdm(range(total_batches)):
             batch_s, batch_o_s, batch_f, batch_pf, batch_pb, sources, targets, fields, list_oovs, source_len, \
                 max_source_oov, w2fs = dataset.get_batch(batch_idx)
             decoded_outputs, lengths = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
@@ -58,7 +60,6 @@ class Predictor(object):
                 line = {}
                 line['sources'] = sources[j]
                 line['fields'] = fields[j]
-                i += 1
                 line['refer'] = targets[j]
                 line['pos'] = [p for p in pos[j] if p != 0]
                 out_seq = []
@@ -70,10 +71,8 @@ class Predictor(object):
                         out_seq.append(list_oovs[j][symbol-self.vocab.size])
                 line['output'] = out_seq
                 self.overlap(line)
-
-                if i % 2500 == 0:
-                    print("Percentages:  %.4f" % (i/float(dataset.len)))
                 lines.append(str(line)+'\n')
+
         return lines
 
     def preeval_batch(self, dataset):
@@ -83,7 +82,7 @@ class Predictor(object):
         i = 0
         total_batches = len(dataset.corpus)
         print("{} batches to be evaluated".format(total_batches))
-        for batch_idx in range(total_batches):
+        for batch_idx in tqdm(range(total_batches)):
             batch_s, batch_o_s, batch_f, batch_pf, batch_pb, \
             _, targets, _, list_oovs, source_len, max_source_oov, w2fs = dataset.get_batch(batch_idx)
             decoded_outputs, lengths = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
@@ -102,10 +101,6 @@ class Predictor(object):
                 out = self.prepare_for_bleu(out_seq)
                 cands[i] = out
 
-                # if i % 2500 == 0:
-                #     print("Percentages:  %.4f" % (i/float(dataset.len)))
-            sys.stdout.write('%d batches evaluated\r' % batch_idx)
-            sys.stdout.flush()
         return cands, refs
 
     def prepare_for_bleu(self, sentence):
