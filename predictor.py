@@ -89,7 +89,7 @@ class Predictor(object):
                                                   input_lengths=source_len, max_source_oov=max_source_oov, w2fs=w2fs)
             for j in range(len(lengths)):
                 i += 1
-                ref = self.prepare_for_bleu(targets[j])
+                ref = self.post_process(targets[j])
                 refs[i] = [ref]
                 out_seq = []
                 for k in range(lengths[j]):
@@ -98,12 +98,12 @@ class Predictor(object):
                         out_seq.append(self.vocab.idx2word[symbol])
                     else:
                         out_seq.append(list_oovs[j][symbol-self.vocab.size])
-                out = self.prepare_for_bleu(out_seq)
+                out = self.post_process(out_seq)
                 cands[i] = out
 
         return cands, refs
 
-    def prepare_for_bleu(self, sentence):
+    def post_process(self, sentence):
         try:
             eos = sentence.index('<EOS>')
             sentence = sentence[:eos]
