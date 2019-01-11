@@ -150,18 +150,17 @@ class Table2text_seq:
         print("vocab size = {}".format(self.vocab.size))
 
     def load_data_light(self, path):
-        print("Loading data $LIGHT$ from {}".format(path))
         prefix = "{}/table2text_nlg/describe_kb/models".format(HOME)
         if self.type == 0:
             vocab_path_pkl = "{}/wikibio_vocab.pkl".format(prefix)
         else:
             vocab_path_pkl = "{}/wikibio_vocab_D.pkl".format(prefix)
-        print("loading vocab ...")
+        print("loading vocab ... from {}".format(vocab_path_pkl))
         with open(vocab_path_pkl, 'rb') as fin:
             data = pickle.load(fin)
         self.vocab = Vocabulary(word2idx=data["word2idx"], idx2word=data["idx2word"])
 
-        print("Loading data from {}".format(path))
+        print("Loading data $LIGHT$ from {}".format(path))
         # (qkey, qitem, index)
         with open(path, 'rb') as fin:
             data = pickle.load(fin)
@@ -221,8 +220,9 @@ class Table2text_seq:
             total_field.append(field)
             samples.append([source, target, field, p_for, p_bck, table])
 
-        print("sorting samples ...")
-        samples.sort(key=lambda x: len(x[0]), reverse=True)
+        if self.data_src == 'train':
+            print("sorting samples ...")
+            samples.sort(key=lambda x: len(x[0]), reverse=True)
 
         if self.type == 0:
             vocab_path_pkl = "{}/wikibio_vocab.pkl".format(prefix)
