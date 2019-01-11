@@ -31,14 +31,14 @@ class Predictor(object):
         return ' '.join([i for i in output if i != '<PAD>' and i != '<EOS>' and i != '<SOS>'])
 
     def overlap(self, line):
-        indexrefer = []
+        indexref = []
         indexoutput = []
         for word in line['sources']:
-            index = [i for i, j in enumerate(line['refer']) if j.lower() == word.lower()]
-            indexrefer.append(index)
+            index = [i for i, j in enumerate(line['ref']) if j.lower() == word.lower()]
+            indexref.append(index)
             index = [i for i, j in enumerate(line['output']) if j.lower() == word.lower()]
             indexoutput.append(index)
-        line['indexrefer'] = indexrefer
+        line['indexref'] = indexref
         line['indexoutput'] = indexoutput
         new_table = []
         for field in line['fields']:
@@ -60,7 +60,7 @@ class Predictor(object):
                 line = {}
                 line['sources'] = sources[j]
                 line['fields'] = fields[j]
-                line['refer'] = targets[j]
+                line['ref'] = targets[j]
                 line['pos'] = [p for p in pos[j] if p != 0]
                 out_seq = []
                 for k in range(lengths[j]):
@@ -69,7 +69,8 @@ class Predictor(object):
                         out_seq.append(self.vocab.idx2word[symbol])
                     else:
                         out_seq.append(list_oovs[j][symbol-self.vocab.size])
-                line['output'] = out_seq
+                out = self.post_process(out_seq)
+                line['output'] = out
                 self.overlap(line)
                 lines.append(str(line)+'\n')
 
@@ -83,8 +84,8 @@ class Predictor(object):
         total_batches = len(dataset.corpus)
         print("{} batches to be evaluated".format(total_batches))
         for batch_idx in tqdm(range(total_batches)):
-            batch_s, batch_o_s, batch_f, batch_pf, batch_pb, \
-            _, targets, _, list_oovs, source_len, max_source_oov, w2fs = dataset.get_batch(batch_idx)
+            batch_s, batch_o_s, batch_f, batch_pf, batch_pb, sources, targets, fields, list_oovs, source_len, \
+            max_source_oov, w2fs = dataset.get_batch(batch_idx)
             decoded_outputs, lengths = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
                                                   input_lengths=source_len, max_source_oov=max_source_oov, w2fs=w2fs)
             for j in range(len(lengths)):

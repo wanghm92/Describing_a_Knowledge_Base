@@ -225,6 +225,7 @@ if __name__ == "__main__":
     # ------------------------------------ predict file ---------------------------------------- #
     elif args.mode == 2:
         model.load_state_dict(torch.load(args.save))
+        load_epoch = int(args.save.split('.')[-1])
         print("model restored")
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
         print("Read $-{}-$ data")
@@ -232,6 +233,7 @@ if __name__ == "__main__":
         print("number of test examples: %d" % dataset.len)
         print("Start Evaluating ...")
         lines = predictor.predict_file(dataset)
+
         print("Start writing")
         f_out = open("Output" + filepost, 'w')
         f_out.writelines(lines)
@@ -245,16 +247,21 @@ if __name__ == "__main__":
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
         print("Read $-{}-$ data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
-        print("number of test e xamples: %d" % dataset.len)
+        print("number of test examples: %d" % dataset.len)
         print("Start Evaluating ...")
         cand, ref = predictor.preeval_batch(dataset)
+
         print('Result:')
         print('ref: ', ref[1][0])
         print('cand: {}'.format(cand[1]))
-        eval_file_out = "{}.epoch_{}.sorted.txt".format(args.dataset, load_epoch)
-        with open(eval_file_out, 'w+') as fout:
+        cand_file_out = "{}.epoch_{}.cand.txt".format(args.dataset, load_epoch)
+        with open(cand_file_out, 'w+') as fout:
             for c in range(len(cand)):
                 fout.write("{}\n".format(cand[c+1]))
+        ref_file_out = "{}.epoch_{}.ref.txt".format(args.dataset, load_epoch)
+        with open(ref_file_out, 'w+') as fout:
+            for r in range(len(ref)):
+                fout.write("{}\n".format(ref[r+1]))
         eval_f = Evaluate()
         final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref)
 
