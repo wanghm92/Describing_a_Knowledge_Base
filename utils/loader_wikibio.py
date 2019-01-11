@@ -150,7 +150,7 @@ class Table2text_seq:
         print("vocab size = {}".format(self.vocab.size))
 
     def load_data_light(self, path):
-        prefix = "{}/table2text_nlg/describe_kb/models".format(HOME)
+        prefix = "{}/table2text_nlg/describe_kb/outputs".format(HOME)
         if self.type == 0:
             vocab_path_pkl = "{}/wikibio_vocab.pkl".format(prefix)
         else:
@@ -176,7 +176,7 @@ class Table2text_seq:
 
 
     def load_data(self, path):
-        prefix = "{}/table2text_nlg/describe_kb/models".format(HOME)
+        prefix = "{}/table2text_nlg/describe_kb/outputs".format(HOME)
         print("Loading data from {}".format(path))
         # (qkey, qitem, index)
         with open(path, 'rb') as fin:

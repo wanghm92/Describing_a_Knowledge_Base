@@ -145,7 +145,7 @@ class Table2text_seq:
 
     def load_data_light(self, path):
         print("Loading data $LIGHT$ from {}".format(path))
-        prefix = "{}/table2text_nlg/describe_kb/models".format(HOME)
+        prefix = "{}/table2text_nlg/describe_kb/outputs".format(HOME)
         if self.type == 0:
             vocab_path_pkl = "{}/wikibio_vocab.pkl".format(prefix)
         else:
@@ -170,7 +170,7 @@ class Table2text_seq:
                 self.max_p = curr_p_max
 
     def load_data(self, path):
-        prefix = "{}/table2text_nlg/describe_kb/models".format(HOME)
+        prefix = "{}/table2text_nlg/describe_kb/outputs".format(HOME)
         print("Loading data from {}".format(path))
         # (qkey, qitem, index)
         with open(path, 'rb') as fin:
@@ -214,11 +214,11 @@ class Table2text_seq:
             samples.append([source, target, field, p_for, p_bck, table])
         samples.sort(key=lambda x: len(x[0]), reverse=True)
         if self.type == 0:
-            vocab_path_pkl = "{}/vocab.pkl".format(prefix)
-            vocab_path_js = "{}/vocab.json".format(prefix)
+            vocab_path_pkl = "{}/dkb_vocab.pkl".format(prefix)
+            vocab_path_js = "{}/dkb_vocab.json".format(prefix)
         else:
-            vocab_path_pkl = "{}/vocab_D.pkl".format(prefix)
-            vocab_path_js = "{}/vocab_D.json".format(prefix)
+            vocab_path_pkl = "{}/dkb_vocab_D.pkl".format(prefix)
+            vocab_path_js = "{}/dkb_vocab_D.json".format(prefix)
         if self.data_src == 'train':
             if self.type == 0:
                 self.vocab = Vocabulary(corpus=total, field=total_field)
