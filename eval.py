@@ -67,7 +67,7 @@ class Evaluate(object):
 
         print("Computing Scores ...")
         final_scores = self.score(ref, hypo)
-        for k, v in final_scores:
+        for k, v in final_scores.items():
             print('{}:\t{}'.format(k,v))
 
         if get_scores:
