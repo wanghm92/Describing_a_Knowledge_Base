@@ -49,13 +49,12 @@ class Evaluate(object):
         else:
             reference_path = kwargs.pop('ref', '')
             candidate_path = kwargs.pop('cand', '')
-
-            # load caption data
             with open(reference_path, 'rb') as f:
                 temp_ref = pickle.load(f)
             with open(candidate_path, 'rb') as f:
                 cand = pickle.load(f)
 
+        epoch = kwargs.pop('epoch', 0)
         # make dictionary
         hypo = {}
         ref = {}
@@ -68,7 +67,7 @@ class Evaluate(object):
         print("Computing Scores ...")
         final_scores = self.score(ref, hypo)
         for k, v in final_scores.items():
-            print('{}:\t{}'.format(k,v))
+            print('[epoch-{}]{}:\t{}'.format(epoch, k, v))
 
         if get_scores:
             return final_scores

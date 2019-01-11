@@ -65,6 +65,12 @@ parser.add_argument('--mask', type=int,  default=0,
                     help='false(0)/true(1)')
 args = parser.parse_args()
 
+save_file_dir = os.path.dirname(args.save)
+print("Models are going to be saved/loaded to/from: {}".format(save_file_dir))
+if not os.path.exists(save_file_dir):
+    print("save directory does not exist, mkdir ...")
+    os.mkdir(save_file_dir)
+
 # Set the random seed manually for reproducibility.
 torch.manual_seed(args.seed)
 if torch.cuda.is_available():
@@ -116,8 +122,8 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
     train_loader = t_dataset.corpus
     len_batch = len(train_loader)
     epoch_examples_total = t_dataset.len
-    save_dir = '.'.join(args.save.split('.')[:-1]) if args.mode == 4 else args.save
-    print("Model saving prefix is: {}".format(save_dir))
+    save_prefix = '.'.join(args.save.split('.')[:-1]) if args.mode == 4 else args.save
+    print("Model saving prefix is: {}".format(save_prefix))
 
     for epoch in range(load_epoch + 1, n_epochs + load_epoch + 1):
         model.train(True)
@@ -140,16 +146,15 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         print('Result:')
         print('ref: ', ref[1][0])
         print('cand: {}'.format(cand[1]))
-        eval_file_out = "valid.{}".format(epoch)
-        # TODO: directory management
+        eval_file_out = "{}/evaluations/{}.epoch_{}.cand.live.txt".format(save_file_dir, args.dataset, load_epoch)
         with open(eval_file_out, 'w+') as fout:
             for c in range(len(cand)):
                 fout.write("{}\n".format(cand[c+1]))
-        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref)
+        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=epoch)
         epoch_score = 2*final_scores['ROUGE_L']*final_scores['Bleu_4']/(final_scores['Bleu_4']+ final_scores['ROUGE_L'])
 
         if epoch_score > best_dev:
-            torch.save(model.state_dict(), "{}.{}".format(save_dir, epoch))
+            torch.save(model.state_dict(), "{}.{}".format(save_prefix, epoch))
             print("model at epoch #{} saved".format(epoch))
             best_dev = epoch_score
 
@@ -235,7 +240,7 @@ if __name__ == "__main__":
         lines = predictor.predict_file(dataset)
 
         print("Start writing")
-        f_out = open("Output" + filepost, 'w')
+        f_out = open("{}/evaluations/Output{}".format(save_file_dir, filepost), 'w')
         f_out.writelines(lines)
         f_out.close()
 
@@ -254,16 +259,16 @@ if __name__ == "__main__":
         print('Result:')
         print('ref: ', ref[1][0])
         print('cand: {}'.format(cand[1]))
-        cand_file_out = "{}.epoch_{}.cand.txt".format(args.dataset, load_epoch)
+        cand_file_out = "{}/evaluations/{}.epoch_{}.cand.txt".format(save_file_dir, args.dataset, load_epoch)
         with open(cand_file_out, 'w+') as fout:
             for c in range(len(cand)):
                 fout.write("{}\n".format(cand[c+1]))
-        ref_file_out = "{}.epoch_{}.ref.txt".format(args.dataset, load_epoch)
+        ref_file_out = "{}/evaluations/{}.ref.txt".format(save_file_dir, args.dataset)
         with open(ref_file_out, 'w+') as fout:
             for r in range(len(ref)):
-                fout.write("{}\n".format(ref[r+1]))
+                fout.write("{}\n".format(ref[r+1][0]))
         eval_f = Evaluate()
-        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref)
+        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=load_epoch)
 
     # ----------------------------------- resume train ----------------------------------------- #
     elif args.mode == 4:
@@ -287,7 +292,7 @@ if __name__ == "__main__":
         print("Start Evaluating ...")
         cand, ref = predictor.preeval_batch(dataset)
         eval_f = Evaluate()
-        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref)
+        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=load_epoch)
         x = input('Save (1) or not')
         if x == '1':
             torch.save(model.state_dict(), args.save)
