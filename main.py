@@ -9,8 +9,7 @@ from utils.loader_wikibio import Table2text_seq
 from structure_generator.EncoderRNN import EncoderRNN
 from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq
-from eval_final import Evaluate
-from eval import Evaluate_test
+from eval import Evaluate
 import random, os
 
 # -------------------------------------------------------------------------------------------------- #
@@ -112,7 +111,7 @@ def train_batch(dataset, batch_idx, model, teacher_forcing_ratio):
 
 
 def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epoch=0):
-    eval_f = Evaluate_test()
+    eval_f = Evaluate()
     best_dev = 0
     train_loader = t_dataset.corpus
     len_batch = len(train_loader)
@@ -136,7 +135,7 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         log_msg = "Finished epoch %d with losses: %.4f" % (epoch, epoch_loss)
         print(log_msg)
         predictor = Predictor(model, v_dataset.vocab, args.cuda)
-        print("Start Evaluating")
+        print("Start Evaluating ...")
         cand, ref = predictor.preeval_batch(v_dataset)
         print('Result:')
         print('ref: ', ref[1][0])
@@ -201,7 +200,7 @@ if __name__ == "__main__":
         model.load_state_dict(torch.load(args.save))
         print("model restored")
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=1)
-        print("Read test data")
+        print("Read $-{}-$ data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
         while True:
             seq_str = input("Type index from (%d to %d) to continue:\n" %(0, dataset.len - 1))
@@ -228,10 +227,10 @@ if __name__ == "__main__":
         model.load_state_dict(torch.load(args.save))
         print("model restored")
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
-        print("Read test data")
+        print("Read $-{}-$ data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
         print("number of test examples: %d" % dataset.len)
-        print("Start Evaluating")
+        print("Start Evaluating ...")
         lines = predictor.predict_file(dataset)
         print("Start writing")
         f_out = open("Output" + filepost, 'w')
@@ -241,22 +240,23 @@ if __name__ == "__main__":
     # ----------------------------------- compute score ---------------------------------------- #
     elif args.mode == 3:
         model.load_state_dict(torch.load(args.save))
+        load_epoch = int(args.save.split('.')[-1])
         print("model restored")
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
-        print("Read test data")
+        print("Read $-{}-$ data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
-        print("number of test examples: %d" % dataset.len)
-        eval_f = Evaluate()
-        print("Start Evaluating")
+        print("number of test e xamples: %d" % dataset.len)
+        print("Start Evaluating ...")
         cand, ref = predictor.preeval_batch(dataset)
-        scores = []
-        fields = ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4", "ROUGE_L"]  # "METEOR"
+        print('Result:')
+        print('ref: ', ref[1][0])
+        print('cand: {}'.format(cand[1]))
+        eval_file_out = "{}.epoch_{}.sorted.txt".format(args.dataset, load_epoch)
+        with open(eval_file_out, 'w+') as fout:
+            for c in range(len(cand)):
+                fout.write("{}\n".format(cand[c+1]))
+        eval_f = Evaluate()
         final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref)
-
-        f_out = open("score" + filepost, 'w')
-        for field in fields:
-            f_out.write(field + '\t' + str(final_scores[field])+'\n')
-        f_out.close()
 
     # ----------------------------------- resume train ----------------------------------------- #
     elif args.mode == 4:
@@ -274,14 +274,12 @@ if __name__ == "__main__":
             print('-' * 89)
             print('Exiting from training early')
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
-        print("Read test data")
+        print("Read $-{}-$ data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
         print("number of test examples: %d" % dataset.len)
-        eval_f = Evaluate()
-        print("Start Evaluating")
+        print("Start Evaluating ...")
         cand, ref = predictor.preeval_batch(dataset)
-        scores = []
-        fields = ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4", "ROUGE_L"]  # "METEOR"
+        eval_f = Evaluate()
         final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref)
         x = input('Save (1) or not')
         if x == '1':
