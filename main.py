@@ -56,6 +56,8 @@ parser.add_argument('--cuda', action='store_true',
                     help='use CUDA')
 parser.add_argument('--save', type=str,  default='params.pkl',
                     help='path to save the final model')
+parser.add_argument('--dataset', type=str,  default='test',
+                    help='type of dataset for prediction')
 parser.add_argument('--mode', type=int,  default=0,
                     help='train(0)/predict_individual(1)/predict_file(2)/compute score(3) or keep train (4)')
 parser.add_argument('--type', type=int,  default=0,
@@ -198,7 +200,7 @@ if __name__ == "__main__":
     elif args.mode == 1:
         model.load_state_dict(torch.load(args.save))
         print("model restored")
-        dataset = Table2text_seq('test', type=args.type, USE_CUDA=args.cuda, batch_size=1)
+        dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=1)
         print("Read test data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
         while True:
@@ -225,7 +227,7 @@ if __name__ == "__main__":
     elif args.mode == 2:
         model.load_state_dict(torch.load(args.save))
         print("model restored")
-        dataset = Table2text_seq('test', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
+        dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
         print("Read test data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
         print("number of test examples: %d" % dataset.len)
@@ -240,7 +242,7 @@ if __name__ == "__main__":
     elif args.mode == 3:
         model.load_state_dict(torch.load(args.save))
         print("model restored")
-        dataset = Table2text_seq('test', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
+        dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
         print("Read test data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
         print("number of test examples: %d" % dataset.len)
@@ -271,7 +273,7 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             print('-' * 89)
             print('Exiting from training early')
-        dataset = Table2text_seq('test', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
+        dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
         print("Read test data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
         print("number of test examples: %d" % dataset.len)
