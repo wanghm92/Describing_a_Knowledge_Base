@@ -220,9 +220,11 @@ class Table2text_seq:
             total_field.append(field)
             samples.append([source, target, field, p_for, p_bck, table])
 
-        if self.data_src == 'train':
-            print("sorting samples ...")
-            samples.sort(key=lambda x: len(x[0]), reverse=True)
+        '''
+            torch.nn.utils.rnn.pack_padded_sequence requires the sequence lengths sorted in decreasing order
+        '''
+        print("sorting samples ...")
+        samples.sort(key=lambda x: len(x[0]), reverse=True)
 
         if self.type == 0:
             vocab_path_pkl = "{}/wikibio_vocab.pkl".format(prefix)
