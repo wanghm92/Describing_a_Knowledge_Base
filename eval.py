@@ -1,20 +1,23 @@
 import pickle
+import os
 import collections
 import sys
 
 sys.path.append('pycocoevalcap')
 from pycocoevalcap.bleu.bleu import Bleu
 from pycocoevalcap.rouge.rouge import Rouge
-from pycocoevalcap.meteor.meteor import Meteor
-#from pycocoevalcap.cider.cider import Cider
+# from pycocoevalcap.meteor.meteor import Meteor
+# from pycocoevalcap.cider.cider import Cider
 
-class Evaluate_test(object):
+class Evaluate(object):
     def __init__(self):
         self.scorers = [
-            (Bleu(4),  ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4"]),
+            (Bleu(4), ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4"]),
+            (Rouge(), "ROUGE_L"),
             # (Meteor(), "METEOR"),
-            (Rouge(), "ROUGE_L")
-        ]#,        (Cider(), "CIDEr")
+            # (Cider(), "CIDEr")
+            ]
+        self.fields = ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4", "ROUGE_L"]
 
     def convert(self, data):
         if isinstance(data, basestring):
@@ -29,6 +32,7 @@ class Evaluate_test(object):
     def score(self, ref, hypo):
         final_scores = {}
         for scorer, method in self.scorers:
+            print("Metric: {}".format(method))
             score, scores = scorer.compute_score(ref, hypo)
             if type(score) == list:
                 for m, s in zip(method, score):
@@ -61,18 +65,10 @@ class Evaluate_test(object):
             ref[i] = temp_ref[vid]
             i += 1
 
-        # compute scores
+        print("Computing Scores ...")
         final_scores = self.score(ref, hypo)
-        # """
-        # print out scores
-        # print ('Bleu_1:\t', final_scores['Bleu_1'])
-        # print ('Bleu_2:\t', final_scores['Bleu_2'])
-        # print ('Bleu_3:\t', final_scores['Bleu_3'])
-        print ('Bleu_4:\t', final_scores['Bleu_4'])
-        print ('ROUGE_L:', final_scores['ROUGE_L'])
-        # print ('METEOR:\t', final_scores['METEOR'])
-        # print ('CIDEr:\t', final_scores['CIDEr'])
-        # """
+        for k, v in final_scores:
+            print('{}:\t{}'.format(k,v))
 
         if get_scores:
             return final_scores
@@ -82,5 +78,5 @@ if __name__ == '__main__':
     cand = {'generated_description1': 'how are you', 'generated_description2': 'Hello how are you'}
     ref = {'generated_description1': ['what are you', 'where are you'],
            'generated_description2': ['Hello how are you', 'Hello how is your day']}
-    x = Evaluate_test()
+    x = Evaluate()
     x.evaluate(live=True, cand=cand, ref=ref)
