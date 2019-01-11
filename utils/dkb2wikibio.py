@@ -104,11 +104,11 @@ class Table2text_seq:
             p_for = []
             p_bck = []
             target = old_targets[idx]
-            target = [str(x) for x in tokenizer(' '.join(target).lower())]  # NOTE: changed to lowercase strings
+            target = [str(x) for x in tokenizer(' '.join(target).lower()) if len(x) > 0]  # NOTE: changed to lowercase strings
             if len(target) > self.text_len:
                 self.text_len = len(target) + 2
             for key, value, index in old_source:
-                value = [str(x) for x in tokenizer(value.lower())]  # NOTE: changed to lowercase strings
+                value = [str(x) for x in tokenizer(value.lower()) if len(x) > 0]  # NOTE: changed to lowercase strings
                 source.extend(value)
                 tag = '<{}>'.format('_'.join(key.split()))  # change key into special tokens
                 field.extend([tag for _ in range(len(value))])

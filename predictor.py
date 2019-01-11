@@ -104,11 +104,12 @@ class Predictor(object):
         return cands, refs
 
     def prepare_for_bleu(self, sentence):
-        idx2word = {k: v for k, v in enumerate(sentence)}
-        sentence = sentence[:idx2word.get('<EOS>', -1)]
-        sent=[x for x in sentence if x != '<PAD>' and x != '<EOS>' and x != '<SOS>']
-        sent = ' '.join(sent)
-        return sent
+        try:
+            eos = sentence.index('<EOS>')
+            sentence = sentence[:eos]
+        except ValueError:
+            pass
+        return ' '.join([x for x in sentence if x != '<PAD>' and x != '<EOS>' and x != '<SOS>'])
 
     def showAttention(self, input_words, output_words, attentions, name, type):
         # Set up figure with colorbar

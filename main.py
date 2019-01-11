@@ -24,7 +24,7 @@ class Config(object):
     nlayers = 1
     lr = 0.001
     epochs = 50
-    batch_size = 256
+    batch_size = 64
     dropout = 0
     bidirectional = True
     max_grad_norm = 10
@@ -109,13 +109,16 @@ def train_batch(dataset, batch_idx, model, teacher_forcing_ratio):
     return batch_loss.item(), len(source_len)
 
 
-def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio):
+def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epoch=0):
     eval_f = Evaluate_test()
     best_dev = 0
     train_loader = t_dataset.corpus
     len_batch = len(train_loader)
     epoch_examples_total = t_dataset.len
-    for epoch in range(1, n_epochs + 1):
+    save_dir = '.'.join(args.save.split('.')[:-1]) if args.mode == 4 else args.save
+    print("Model saving prefix is: {}".format(save_dir))
+
+    for epoch in range(load_epoch + 1, n_epochs + load_epoch + 1):
         model.train(True)
         torch.set_grad_enabled(True)
         epoch_loss = 0
@@ -137,6 +140,7 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio):
         print('ref: ', ref[1][0])
         print('cand: {}'.format(cand[1]))
         eval_file_out = "valid.{}".format(epoch)
+        # TODO: directory management
         with open(eval_file_out, 'w+') as fout:
             for c in range(len(cand)):
                 fout.write("{}\n".format(cand[c+1]))
@@ -144,7 +148,7 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio):
         epoch_score = 2*final_scores['ROUGE_L']*final_scores['Bleu_4']/(final_scores['Bleu_4']+ final_scores['ROUGE_L'])
 
         if epoch_score > best_dev:
-            torch.save(model.state_dict(), "{}.{}".format(args.save, epoch))
+            torch.save(model.state_dict(), "{}.{}".format(save_dir, epoch))
             print("model at epoch #{} saved".format(epoch))
             best_dev = epoch_score
 
@@ -185,7 +189,7 @@ if __name__ == "__main__":
             print("Reading valid data ...")
             v_dataset = Table2text_seq('valid', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
             print("start training...")
-            train_epoches(t_dataset, v_dataset, model, config.epochs, 1)
+            train_epoches(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1)
         except KeyboardInterrupt:
             print('-' * 89)
             print('Exiting from training early')
@@ -256,13 +260,14 @@ if __name__ == "__main__":
     elif args.mode == 4:
         # load and keep training
         model.load_state_dict(torch.load(args.save))
-        print("model restored")
+        load_epoch = int(args.save.split('.')[-1])
+        print("model restored from epoch-{}: {}".format(load_epoch, args.save))
         try:
             print("number of training examples: %d" % t_dataset.len)
             print("Reading valid data ...")
             v_dataset = Table2text_seq('valid', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
             print("start training...")
-            train_epoches(t_dataset, v_dataset, model, 1, 1)
+            train_epoches(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1, load_epoch=load_epoch)
         except KeyboardInterrupt:
             print('-' * 89)
             print('Exiting from training early')

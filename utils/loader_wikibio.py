@@ -140,14 +140,14 @@ class Table2text_seq:
         else:
             raise ValueError("Only train, valid, test data_srcs are supported")
 
-        if data_src == 'train' and (train_mode != 0 or train_mode != 4):  # training(0) and resume training(4)
+        if data_src == 'train' and (train_mode != 0 and train_mode != 4):  # training(0) and resume training(4)
             self.data = self.load_data_light(path)
         else:
             self.data = self.load_data(path)
             self.len = len(self.data)
             self.corpus = self.batchfy()
 
-        print(self.vocab.size)
+        print("vocab size = {}".format(self.vocab.size))
 
     def load_data_light(self, path):
         print("Loading data $LIGHT$ from {}".format(path))
