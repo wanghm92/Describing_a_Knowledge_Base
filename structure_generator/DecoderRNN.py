@@ -215,7 +215,7 @@ class DecoderRNN(BaseRNN):
                                                            dec_hidden.squeeze(1), enc_proj, batch_size, max_enc_len,
                                                            enc_mask, enc_output_selfatt, enc_field_selfatt,
                                                            embed_input.squeeze(1), max_source_oov, f_matrix)
-            # not allow decoder to output UNK
+            # NOTE: not allow decoder to output UNK
             combined_vocab[:, self.unk_id] = 0
             symbols = combined_vocab.topk(1)[1]
             if self.mask == 1:

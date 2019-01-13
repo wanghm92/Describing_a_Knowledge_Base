@@ -62,7 +62,6 @@ else:
     filepost = ""
 
 if args.type == 1:
-    config.epochs = 20
     filepost += "_A.txt"
 else:
     filepost += "_P.txt"
