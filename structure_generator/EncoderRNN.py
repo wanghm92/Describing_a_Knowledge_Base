@@ -1,13 +1,15 @@
 import torch.nn as nn
 import torch
+import sys
 from .baseRNN import BaseRNN
 
 
 class EncoderRNN(BaseRNN):
-    def __init__(self, vocab_size, embedding, hidden_size, pos_size, pemsize, input_dropout_p=0, dropout_p=0,
-                 n_layers=1, bidirectional=True, rnn_cell='gru', variable_lengths=True):
+    def __init__(self, vocab_size, embedding, hidden_size, pos_size, pemsize, hidden_type='emb', input_dropout_p=0,
+                 dropout_p=0, n_layers=1, bidirectional=True, rnn_cell='gru', variable_lengths=True):
         super(EncoderRNN, self).__init__(vocab_size, hidden_size, input_dropout_p, dropout_p, n_layers, rnn_cell)
 
+        self.hidden_type = hidden_type
         self.variable_lengths = variable_lengths
         self.pos_embedding = nn.Embedding(pos_size, pemsize, padding_idx=0)
         self.embedding = embedding
@@ -28,11 +30,15 @@ class EncoderRNN(BaseRNN):
         embed = self.input_dropout(embed)
         if self.variable_lengths:
             embedded = nn.utils.rnn.pack_padded_sequence(embed, input_lengths, batch_first=True)
+
         enc_hidden, enc_state = self.rnn(embedded)
 
-        # TODO: use encoder hidden states to run baseline models for seq2seq+att (bahdanau)
+        if not self.hidden_type == 'emb':
+            enc_outputs, _ = nn.utils.rnn.pad_packed_sequence(enc_hidden, batch_first=True)
+        else:
+            enc_outputs = None
 
-        return embed_input, embed_field, embed_pos, enc_state, mask
+        return enc_outputs, embed_input, embed_field, embed_pos, enc_state, mask
 
 
 

@@ -17,7 +17,7 @@ import random, os
 # ------------------------------------------- Args ------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------- #
 
-parser = argparse.ArgumentParser(description='pointer model')
+parser = argparse.ArgumentParser(description='pointer generator model')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
 parser.add_argument('--cuda', action='store_true',

@@ -11,16 +11,16 @@ from .baseRNN import BaseRNN
 
 class DecoderRNN(BaseRNN):
 
-    def __init__(self, vocab_size, embedding, embed_size, pemsize, sos_id, eos_id,
-                 unk_id, max_len=100, n_layers=1, rnn_cell='gru',
-                 bidirectional=True, input_dropout_p=0, dropout_p=0,
-                 lmbda=1.5, USE_CUDA = torch.cuda.is_available(), mask=0):
+    def __init__(self, vocab_size, embedding, embed_size, pemsize, sos_id, eos_id, unk_id,
+                 hidden_type='emb', max_len=100, n_layers=1, rnn_cell='gru', bidirectional=True,
+                 input_dropout_p=0, dropout_p=0, lmbda=1.5, USE_CUDA = torch.cuda.is_available(), mask=0):
         
         # NOTE
         hidden_size = embed_size
         
         super(DecoderRNN, self).__init__(vocab_size, hidden_size, input_dropout_p, dropout_p, n_layers, rnn_cell)
 
+        self.hidden_type = hidden_type
         self.bidirectional_encoder = bidirectional
         self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
         self.output_size = vocab_size
@@ -33,22 +33,35 @@ class DecoderRNN(BaseRNN):
         self.embedding = embedding
         self.lmbda = lmbda
         self.USE_CUDA = USE_CUDA
-        #directions
+
+        # ----------------- params for directions ----------------- #
         self.W_dir = nn.Linear(hidden_size * 2, hidden_size)
-        #output
+
+        # ----------------- params for output ----------------- #
         self.V = nn.Linear(hidden_size * 3, self.output_size)
-        #params for attention
-        self.We = nn.Linear(hidden_size, hidden_size)  # for obtaining e from encoder hiddden
+
+        # ----------------- params for attention ----------------- #
+        # for obtaining e from encoder hidden
+        input_shape = hidden_size
+        if self.hidden_type != 'emb':
+            if self.bidirectional_encoder:
+                input_shape *= 2
+            if self.hidden_type == 'both':
+                input_shape += hidden_size
+        self.We = nn.Linear(input_shape, hidden_size)
+
         self.Wf = nn.Linear(hidden_size, hidden_size)  # for obtaining e from encoder field
         self.Wh = nn.Linear(hidden_size, hidden_size)  # for obtaining e from decoder current state
         self.Wc = nn.Linear(1, hidden_size)  # for obtaining e from context vector
         self.v = nn.Linear(hidden_size, 1)
-        # parameters for p_gen
+
+        # ----------------- parameters for p_gen ----------------- #
         self.w_e = nn.Linear(hidden_size, 1)    # for changing context vector into a scalar
         self.w_f = nn.Linear(hidden_size, 1)    # for changing context vector into a scalar
         self.w_h = nn.Linear(hidden_size, 1)    # for changing hidden state into a scalar
         self.w_y = nn.Linear(embed_size, 1)     # for changing input embedding into a scalar
-        # parameters for self attention
+
+        # ----------------- parameters for self attention ----------------- #
         self_size = pemsize * 2  # hidden_size +
         self.Win = nn.Linear(self_size, self_size)
         self.Wout = nn.Linear(self_size, self_size)
@@ -60,13 +73,13 @@ class DecoderRNN(BaseRNN):
         f = gin.bmm(self.Wg(gout).transpose(1, 2))
         return F.softmax(f, dim=2)
 
-    def self_attn(self, f_matrix, enc_hidden, enc_field):
-        enc_hidden_selfatt = torch.bmm(f_matrix, enc_hidden)
+    def self_attn(self, f_matrix, end_output, enc_field):
+        end_output_selfatt = torch.bmm(f_matrix, end_output)
         enc_field_selfatt = torch.bmm(f_matrix, enc_field)
-        return enc_hidden_selfatt, enc_field_selfatt
+        return end_output_selfatt, enc_field_selfatt
 
     def decode_step(self, input_ids, coverage, dec_hidden, enc_proj, batch_size, max_enc_len,
-                    enc_mask, enc_hidden_selfatt, enc_field_selfatt, embed_input, max_source_oov, f_matrix):
+                    enc_mask, end_output_selfatt, enc_field_selfatt, embed_input, max_source_oov, f_matrix):
         dec_proj = self.Wh(dec_hidden).unsqueeze(1).expand_as(enc_proj)
         # print('dec_proj: {}'.format(dec_proj.size()))
 
@@ -80,14 +93,14 @@ class DecoderRNN(BaseRNN):
         attn_scores = F.softmax(attn_scores, dim=1)
         # print('attn_scores: {}'.format(attn_scores.size()))
 
-        enc_hidden_context = attn_scores.unsqueeze(1).bmm(enc_hidden_selfatt).squeeze(1)
+        end_output_context = attn_scores.unsqueeze(1).bmm(end_output_selfatt).squeeze(1)
         enc_field_context = attn_scores.unsqueeze(1).bmm(enc_field_selfatt).squeeze(1)
 
         # output proj calculation
-        p_vocab = F.softmax(self.V(torch.cat((dec_hidden, enc_hidden_context, enc_field_context), 1)), dim=1)
+        p_vocab = F.softmax(self.V(torch.cat((dec_hidden, end_output_context, enc_field_context), 1)), dim=1)
         # print('p_vocab: {}'.format(p_vocab.size()))
         # p_gen calculation
-        p_gen = torch.sigmoid(self.w_e(enc_hidden_context) + self.w_f(enc_field_context) + self.w_h(dec_hidden) + self.w_y(embed_input))
+        p_gen = torch.sigmoid(self.w_e(end_output_context) + self.w_f(enc_field_context) + self.w_h(dec_hidden) + self.w_y(embed_input))
         p_gen = p_gen.view(-1, 1)
         # print('p_gen: {}'.format(p_gen.size()))
         weighted_Pvocab = p_vocab * p_gen
@@ -114,25 +127,31 @@ class DecoderRNN(BaseRNN):
         return combined_vocab, attn_scores
 
     def forward(self, max_source_oov=0, targets=None, targets_id=None, input_ids=None,
-                enc_mask=None, enc_state=None, enc_hidden=None, enc_field=None,
-                enc_pos=None, teacher_forcing_ratio=None, w2fs=None, fig=False):
+                end_hidden=None, enc_input=None, enc_state=None, enc_mask=None, enc_field=None, enc_pos=None,
+                teacher_forcing_ratio=None, w2fs=None, fig=False):
+        # TODO: add flag for optional field encodings to run pointer-generator baseline
 
-        targets, batch_size, max_length, max_enc_len = self._validate_args(targets, enc_state, enc_hidden, teacher_forcing_ratio)
+        targets, batch_size, max_length, max_enc_len = self._validate_args(targets, enc_state, enc_input, teacher_forcing_ratio)
         decoder_hidden = self._init_state(enc_state)
         coverage = torch.zeros(batch_size, max_enc_len)
         if self.USE_CUDA:
             coverage = coverage.cuda()
 
-        enc_hidden_proj = self.We(enc_hidden.view(batch_size*max_enc_len, -1)).view(batch_size, max_enc_len, -1)
+        if self.hidden_type == 'emb':
+            end_output = enc_input
+        elif self.hidden_type == 'rnn':
+            end_output = end_hidden
+        else:
+            end_output = torch.cat((end_hidden, enc_input), -1)
 
-        # TODO: add flag for optional field encodings to run pointer-generator baseline
+        end_output_proj = self.We(end_output.view(batch_size*max_enc_len, -1)).view(batch_size, max_enc_len, -1)
 
         enc_field_proj = self.Wf(enc_field.view(batch_size*max_enc_len, -1)).view(batch_size, max_enc_len, -1)
-        enc_proj = enc_hidden_proj + enc_field_proj
+        enc_proj = end_output_proj + enc_field_proj
 
         # get link attention scores
         f_matrix = self.get_matrix(enc_pos)
-        enc_hidden_selfatt, enc_field_selfatt = self.self_attn(f_matrix, enc_hidden, enc_field)
+        end_output_selfatt, enc_field_selfatt = self.self_attn(f_matrix, end_output, enc_field)
 
         if teacher_forcing_ratio:
             lm_loss, cov_loss = [], []
@@ -152,7 +171,7 @@ class DecoderRNN(BaseRNN):
                 embed_input = embed_inputs[:, step, :]
 
                 combined_vocab, attn_scores = self.decode_step(input_ids, coverage, dec_hidden, enc_proj, batch_size,
-                                                               max_enc_len, enc_mask, enc_hidden_selfatt, enc_field_selfatt,
+                                                               max_enc_len, enc_mask, end_output_selfatt, enc_field_selfatt,
                                                                embed_input, max_source_oov, f_matrix)
                 # mask the output to account for PAD
                 target_mask_0 = target_id.ne(0).detach()
@@ -164,7 +183,6 @@ class DecoderRNN(BaseRNN):
 
                 coverage = coverage + attn_scores
                 # print('coverage: {}'.format(coverage.size()))
-
                 # Coverage Loss
                 # take minimum across both attn_scores and coverage
                 _cov_loss, _ = torch.stack((coverage, attn_scores), 2).min(2)
@@ -176,10 +194,10 @@ class DecoderRNN(BaseRNN):
                 torch.stack(cov_loss, 1).sum(1).div(dec_lens)
             return total_masked_loss
         else:
-            return self.evaluate(targets, batch_size, max_length, max_source_oov, enc_hidden_selfatt, enc_field_selfatt,
+            return self.evaluate(targets, batch_size, max_length, max_source_oov, end_output_selfatt, enc_field_selfatt,
                                  f_matrix, decoder_hidden, enc_mask, input_ids, coverage, enc_proj, max_enc_len, w2fs, fig)
 
-    def evaluate(self, targets, batch_size, max_length, max_source_oov, enc_hidden_selfatt, enc_field_selfatt, f_matrix,
+    def evaluate(self, targets, batch_size, max_length, max_source_oov, end_output_selfatt, enc_field_selfatt, f_matrix,
                  decoder_hidden, enc_mask, input_ids, coverage, enc_proj, max_enc_len, w2fs, fig):
         lengths = np.array([max_length] * batch_size)
         decoded_outputs = []
@@ -191,7 +209,7 @@ class DecoderRNN(BaseRNN):
             dec_hidden, _c = self.rnn(embed_input, decoder_hidden)
             combined_vocab, attn_scores = self.decode_step(input_ids, coverage,
                                                            dec_hidden.squeeze(1), enc_proj, batch_size, max_enc_len,
-                                                           enc_mask, enc_hidden_selfatt, enc_field_selfatt,
+                                                           enc_mask, end_output_selfatt, enc_field_selfatt,
                                                            embed_input.squeeze(1), max_source_oov, f_matrix)
             # not allow decoder to output UNK
             combined_vocab[:, self.unk_id] = 0
