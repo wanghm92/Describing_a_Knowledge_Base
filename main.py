@@ -118,7 +118,8 @@ def train_batch(dataset, batch_idx, model, teacher_forcing_ratio):
 
 def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epoch=0):
     eval_f = Evaluate()
-    best_dev = 0
+    best_dev_bleu = 0.0
+    best_dev_rouge = 0.0
     train_loader = t_dataset.corpus
     len_batch = len(train_loader)
     epoch_examples_total = t_dataset.len
@@ -126,20 +127,24 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
     print("Model saving prefix is: {}".format(save_prefix))
 
     for epoch in range(load_epoch + 1, n_epochs + load_epoch + 1):
+        # --------------------------------------- train -------------------------------------------- #
         model.train(True)
         torch.set_grad_enabled(True)
         epoch_loss = 0
 
         batch_indices = list(range(len_batch))
         random.shuffle(batch_indices)
+
         for idx, batch_idx in enumerate(batch_indices):
             loss, num_examples = train_batch(t_dataset, batch_idx, model, teacher_forcing_ratio)
             epoch_loss += loss * num_examples
             sys.stdout.write('%d batches trained. current batch loss: %f\r' % (idx, loss))
             sys.stdout.flush()
+
         epoch_loss /= epoch_examples_total
-        log_msg = "Finished epoch %d with losses: %.4f" % (epoch, epoch_loss)
-        print(log_msg)
+        print("Finished epoch %d with average loss: %.4f" % (epoch, epoch_loss))
+
+        # --------------------------------------- inference -------------------------------------------- #
         predictor = Predictor(model, v_dataset.vocab, args.cuda)
         print("Start Evaluating ...")
         cand, ref = predictor.preeval_batch(v_dataset)
@@ -150,13 +155,32 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         with open(eval_file_out, 'w+') as fout:
             for c in range(len(cand)):
                 fout.write("{}\n".format(cand[c+1]))
-        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=epoch)
-        epoch_score = 2*final_scores['ROUGE_L']*final_scores['Bleu_4']/(final_scores['Bleu_4']+ final_scores['ROUGE_L'])
 
-        if epoch_score > best_dev:
-            torch.save(model.state_dict(), "{}.{}".format(save_prefix, epoch))
+        # --------------------------------------- evaluation -------------------------------------------- #
+        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=epoch)
+        rouge_l = final_scores['ROUGE_L']
+        bleu_4 = final_scores['Bleu_4']
+
+        # ------------------------------------------ save ----------------------------------------------- #
+        if bleu_4 >= best_dev_bleu and rouge_l >= best_dev_rouge:
+            suffix = ".best_bleu_rouge"
+            best_dev_bleu = bleu_4
+            best_dev_rouge = rouge_l
+        elif bleu_4 >= best_dev_bleu:
+            suffix = ".best_bleu"
+            best_dev_bleu = bleu_4
+        elif rouge_l >= best_dev_rouge:
+            suffix = ".best_rouge"
+            best_dev_rouge = rouge_l
+        else:
+            suffix = ""
+        if len(suffix) > 0:
             print("model at epoch #{} saved".format(epoch))
-            best_dev = epoch_score
+        else:
+            print("[*** {} ***] model at epoch #{} saved".format(suffix, epoch))
+        torch.save(model.state_dict(), "{}{}.{}".format(save_prefix, suffix, epoch))
+
+        # epoch_score = 2*rouge_l*bleu_4/(rouge_l + bleu_4)
 
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------------- Main ------------------------------------------------- #
