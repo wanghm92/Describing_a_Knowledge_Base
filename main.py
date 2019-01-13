@@ -9,40 +9,9 @@ from utils.loader_wikibio import Table2text_seq
 from structure_generator.EncoderRNN import EncoderRNN
 from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq
+from config import Config, ConfigTest
 from eval import Evaluate
 import random, os
-
-# -------------------------------------------------------------------------------------------------- #
-# ------------------------------------------ Config ------------------------------------------------ #
-# -------------------------------------------------------------------------------------------------- #
-
-class Config(object):
-    cell = "GRU"
-    emsize = 256
-    pemsize = 5
-    nlayers = 1
-    lr = 0.001
-    epochs = 50
-    batch_size = 64
-    dropout = 0
-    bidirectional = True
-    max_grad_norm = 10
-    max_len = 100
-
-
-class ConfigTest(object):
-    cell = "GRU"
-    emsize = 30
-    pemsize = 30
-    nlayers = 1
-    lr = 0.001
-    epochs = 2
-    batch_size = 10
-    dropout = 0
-    bidirectional = True
-    max_grad_norm = 1
-    testmode = True
-    max_len = 50
 
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------------- Args ------------------------------------------------- #
