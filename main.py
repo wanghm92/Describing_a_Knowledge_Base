@@ -4,12 +4,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from predictor import Predictor
-# from utils.loader import Table2text_seq
-from utils.loader_wikibio import Table2text_seq
+from utils.loader import Table2text_seq
+# from utils.loader_wikibio import Table2text_seq
 from structure_generator.EncoderRNN import EncoderRNN
 from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq
-from config import Config, ConfigTest
+from configurations import Config, ConfigTest
 from eval import Evaluate
 import random, os
 
@@ -32,6 +32,8 @@ parser.add_argument('--type', type=int,  default=0,
                     help='person(0)/animal(1)')
 parser.add_argument('--mask', type=int,  default=0,
                     help='false(0)/true(1)')
+parser.add_argument('--hidden_type', type=str,  default='emb',
+                    help='encodings for attention layer: RNN hidden state(rnn) or word embeddings(emb)')
 args = parser.parse_args()
 
 save_file_dir = os.path.dirname(args.save)
@@ -170,11 +172,11 @@ if __name__ == "__main__":
 
     embedding = nn.Embedding(t_dataset.vocab.size, config.emsize, padding_idx=0)
     encoder = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, hidden_size=config.emsize,
-                         pos_size=t_dataset.max_p, pemsize=config.pemsize,
+                         pos_size=t_dataset.max_p, pemsize=config.pemsize, hidden_type=args.hidden_type,
                          input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers,
                          bidirectional=config.bidirectional, rnn_cell=config.cell, variable_lengths=True)
     decoder = DecoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, embed_size=config.emsize,
-                         pemsize=config.pemsize, sos_id=3, eos_id=2, unk_id=1,
+                         pemsize=config.pemsize, sos_id=3, eos_id=2, unk_id=1, hidden_type=args.hidden_type,
                          n_layers=config.nlayers, rnn_cell=config.cell, bidirectional=config.bidirectional,
                          input_dropout_p=config.dropout, dropout_p=config.dropout, USE_CUDA=args.cuda,
                          mask=args.mask)
