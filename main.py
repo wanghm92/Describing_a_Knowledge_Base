@@ -32,8 +32,8 @@ parser.add_argument('--type', type=int,  default=0,
                     help='person(0)/animal(1)')
 parser.add_argument('--mask', type=int,  default=0,
                     help='false(0)/true(1)')
-parser.add_argument('--hidden_type', type=str,  default='emb',
-                    help='encodings for attention layer: RNN hidden state(rnn) or word embeddings(emb)')
+parser.add_argument('--hidden_type', type=str,  default='emb', choices=['emb', 'rnn', 'both'],
+                    help='encodings for attention layer: RNN hidden state(rnn) or word embeddings(emb) or (both)')
 args = parser.parse_args()
 
 save_file_dir = os.path.dirname(args.save)
