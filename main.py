@@ -22,17 +22,17 @@ parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
 parser.add_argument('--cuda', action='store_true',
                     help='use CUDA')
-parser.add_argument('--save', type=str,  default='params.pkl',
+parser.add_argument('--save', type=str, default='params.pkl',
                     help='path to save the final model')
-parser.add_argument('--dataset', type=str,  default='test',
+parser.add_argument('--dataset', type=str, default='test', choices=['test', 'valid'],
                     help='type of dataset for prediction')
-parser.add_argument('--mode', type=int,  default=0,
+parser.add_argument('--mode', type=int, default=0, choices=[0, 1, 2, 3, 4],
                     help='train(0)/predict_individual(1)/predict_file(2)/compute score(3) or keep train (4)')
-parser.add_argument('--type', type=int,  default=0,
+parser.add_argument('--type', type=int, default=0, choices=[0, 1],
                     help='person(0)/animal(1)')
-parser.add_argument('--mask', type=int,  default=0,
+parser.add_argument('--mask', type=int, default=0, choices=[0, 1],
                     help='false(0)/true(1)')
-parser.add_argument('--hidden_type', type=str,  default='emb', choices=['emb', 'rnn', 'both'],
+parser.add_argument('--hidden_type', type=str, default='emb', choices=['emb', 'rnn', 'both'],
                     help='encodings for attention layer: RNN hidden state(rnn) or word embeddings(emb) or (both)')
 args = parser.parse_args()
 
