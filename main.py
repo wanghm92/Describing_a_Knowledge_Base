@@ -41,6 +41,8 @@ print("Models are going to be saved/loaded to/from: {}".format(save_file_dir))
 if not os.path.exists(save_file_dir):
     print("save directory does not exist, mkdir ...")
     os.mkdir(save_file_dir)
+    if not os.path.exists(os.path.join(save_file_dir, "evaluations")):
+        os.mkdir(os.path.join(save_file_dir, "evaluations"))
 
 # Set the random seed manually for reproducibility.
 torch.manual_seed(args.seed)
@@ -60,7 +62,6 @@ else:
     filepost = ""
 
 if args.type == 1:
-    args.save = 'params_D.pkl'
     config.epochs = 20
     filepost += "_A.txt"
 else:
@@ -93,6 +94,7 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
     best_dev_rouge = 0.0
     train_loader = t_dataset.corpus
     len_batch = len(train_loader)
+    print("{} batches to be trained".format(len_batch))
     epoch_examples_total = t_dataset.len
     save_prefix = '.'.join(args.save.split('.')[:-1]) if args.mode == 4 else args.save
     print("Model saving prefix is: {}".format(save_prefix))
@@ -169,7 +171,7 @@ if __name__ == "__main__":
     # -------------------------------------------------------------------------------------------------- #
     # -------------------------------------- Building Model -------------------------------------------- #
     # -------------------------------------------------------------------------------------------------- #
-
+    print("Building Model ...")
     embedding = nn.Embedding(t_dataset.vocab.size, config.emsize, padding_idx=0)
     encoder = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, hidden_size=config.emsize,
                          pos_size=t_dataset.max_p, pemsize=config.pemsize, hidden_type=args.hidden_type,

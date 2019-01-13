@@ -141,7 +141,7 @@ class Table2text_seq:
             self.len = len(self.data)
             self.corpus = self.batchfy()
 
-        print(self.vocab.size)
+        print("vocab size = {}".format(self.vocab.size))
 
     def load_data_light(self, path):
         print("Loading data $LIGHT$ from {}".format(path))
