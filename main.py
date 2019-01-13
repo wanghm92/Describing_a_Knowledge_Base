@@ -58,7 +58,10 @@ device = torch.device("cuda" if args.cuda else "cpu")
 
 # -------------------------------- Hyperparams and Tensorboard ------------------------------------ #
 config = Config()
-writer = SummaryWriter()
+summary_dir = os.path.join(save_file_dir, "summary")
+if not os.path.exists(summary_dir):
+    os.mkdir(summary_dir)
+writer = SummaryWriter(summary_dir)
 
 # --------------------------------------- file suffix --------------------------------------------- #
 if args.mask == 1:
@@ -115,7 +118,6 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         for idx, batch_idx in enumerate(batch_indices):
             loss, num_examples = train_batch(t_dataset, batch_idx, model, teacher_forcing_ratio)
             epoch_loss += loss * num_examples
-            writer.add_scalar('loss/batch_loss', loss, idx)
             sys.stdout.write('%d batches trained. current batch loss: %f\r' % (idx, loss))
             sys.stdout.flush()
 
@@ -295,11 +297,4 @@ if __name__ == "__main__":
         predictor = Predictor(model, dataset.vocab, args.cuda)
         print("number of test examples: %d" % dataset.len)
         print("Start Evaluating ...")
-        cand, ref = predictor.preeval_batch(dataset)
-        eval_f = Evaluate()
-        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=load_epoch)
-        x = input('Save (1) or not')
-        if x == '1':
-            torch.save(model.state_dict(), args.save)
-            print("model saved")
-
+        cand, ref = predictor.preeval_batch
