@@ -12,6 +12,7 @@ from structure_generator.seq2seq import Seq2seq
 from configurations import Config, ConfigTest
 from eval import Evaluate
 import random, os
+from tensorboardX import SummaryWriter
 
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------------- Args ------------------------------------------------- #
@@ -36,6 +37,7 @@ parser.add_argument('--hidden_type', type=str, default='emb', choices=['emb', 'r
                     help='encodings for attention layer: RNN hidden state(rnn) or word embeddings(emb) or (both)')
 args = parser.parse_args()
 
+# --------------------------------------- save_file_dir ------------------------------------------- #
 save_file_dir = os.path.dirname(args.save)
 print("Models are going to be saved/loaded to/from: {}".format(save_file_dir))
 if not os.path.exists(save_file_dir):
@@ -44,6 +46,7 @@ if not os.path.exists(save_file_dir):
     if not os.path.exists(os.path.join(save_file_dir, "evaluations")):
         os.mkdir(os.path.join(save_file_dir, "evaluations"))
 
+# ------------------------------------- random seed and cuda -------------------------------------- #
 # Set the random seed manually for reproducibility.
 torch.manual_seed(args.seed)
 if torch.cuda.is_available():
@@ -51,11 +54,13 @@ if torch.cuda.is_available():
         print("WARNING: You have- a CUDA device, so you should probably run with --cuda")
     else:
         torch.cuda.manual_seed(args.seed)
-
 device = torch.device("cuda" if args.cuda else "cpu")
-config = Config()
-# config = ConfigTest()
 
+# -------------------------------- Hyperparams and Tensorboard ------------------------------------ #
+config = Config()
+writer = SummaryWriter()
+
+# --------------------------------------- file suffix --------------------------------------------- #
 if args.mask == 1:
     filepost = "_m"
 else:
@@ -110,11 +115,13 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         for idx, batch_idx in enumerate(batch_indices):
             loss, num_examples = train_batch(t_dataset, batch_idx, model, teacher_forcing_ratio)
             epoch_loss += loss * num_examples
+            writer.add_scalar('loss/batch_loss', loss, idx)
             sys.stdout.write('%d batches trained. current batch loss: %f\r' % (idx, loss))
             sys.stdout.flush()
 
         epoch_loss /= epoch_examples_total
         print("Finished epoch %d with average loss: %.4f" % (epoch, epoch_loss))
+        writer.add_scalar('loss/epoch_loss', epoch_loss, epoch)
 
         # --------------------------------------- inference -------------------------------------------- #
         predictor = Predictor(model, v_dataset.vocab, args.cuda)
@@ -132,6 +139,8 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=epoch)
         rouge_l = final_scores['ROUGE_L']
         bleu_4 = final_scores['Bleu_4']
+        writer.add_scalar('valid/ROUGE_L', rouge_l, epoch)
+        writer.add_scalar('valid/Bleu_4', bleu_4, epoch)
 
         # ------------------------------------------ save ----------------------------------------------- #
         if bleu_4 >= best_dev_bleu and rouge_l >= best_dev_rouge:
