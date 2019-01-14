@@ -31,12 +31,16 @@ parser.add_argument('--mode', type=int, default=0, choices=[0, 1, 2, 3, 4],
                     help='train(0)/predict_individual(1)/predict_file(2)/compute score(3) or keep train (4)')
 parser.add_argument('--type', type=int, default=0, choices=[0, 1],
                     help='person(0)/animal(1)')
-parser.add_argument('--mask', type=int, default=0, choices=[0, 1],
+parser.add_argument('--mask', action='store_true',
                     help='false(0)/true(1)')
 parser.add_argument('--attn_type', type=str, default='concat', choices=['concat', 'dot'],
                     help='type of attention score calculation: concat, dot')
+parser.add_argument('--attn_fuse', type=str, default='concat', choices=['sum', 'prod'],
+                    help='type of attention score aggregation: sum, prod')
 parser.add_argument('--hidden_type', type=str, default='emb', choices=['emb', 'rnn', 'both'],
                     help='encodings for attention layer: RNN hidden state(rnn) or word embeddings(emb) or (both)')
+parser.add_argument('--field_self_att', action='store_false',
+                    help='whether use field self-attention')
 args = parser.parse_args()
 
 # --------------------------------------- save_file_dir ------------------------------------------- #
@@ -191,10 +195,11 @@ if __name__ == "__main__":
                          bidirectional=config.bidirectional, rnn_cell=config.cell, variable_lengths=True)
     decoder = DecoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, embed_size=config.emsize,
                          pemsize=config.pemsize, sos_id=3, eos_id=2, unk_id=1,
-                         hidden_type=args.hidden_type, attn_type=args.attn_type,
-                         n_layers=config.nlayers, rnn_cell=config.cell, bidirectional=config.bidirectional,
-                         input_dropout_p=config.dropout, dropout_p=config.dropout, USE_CUDA=args.cuda,
-                         mask=args.mask)
+                         rnn_cell=config.cell, hidden_type=args.hidden_type, attn_type=args.attn_type,
+                         attn_fuse=args.attn_fuse,
+                         bidirectional=config.bidirectional, field_self_att=args.field_self_att, mask=args.mask,
+                         use_cuda=args.cuda,
+                         input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers)
     model = Seq2seq(encoder, decoder).to(device)
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
 

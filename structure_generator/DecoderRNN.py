@@ -10,9 +10,10 @@ from .baseRNN import BaseRNN
 
 class DecoderRNN(BaseRNN):
 
-    def __init__(self, vocab_size, embedding, embed_size, pemsize, sos_id, eos_id, unk_id,
-                 hidden_type='emb', attn_type='concat',max_len=100, n_layers=1, rnn_cell='gru', bidirectional=True,
-                 input_dropout_p=0, dropout_p=0, lmbda=1.5, USE_CUDA = torch.cuda.is_available(), mask=0):
+    def __init__(self, vocab_size, embedding, embed_size, pemsize, sos_id, eos_id, unk_id, 
+                 rnn_cell='gru', hidden_type='emb', attn_type='concat', attn_fuse='sum',
+                 bidirectional=True, field_self_att=True, mask=False, use_cuda=torch.cuda.is_available(),
+                 n_layers=1, input_dropout_p=0, dropout_p=0, max_len=100, lmbda=1.5):
         
         # NOTE
         hidden_size = embed_size
@@ -21,8 +22,9 @@ class DecoderRNN(BaseRNN):
 
         self.hidden_type = hidden_type
         self.attn_type = attn_type
-        self.use_bias = self.attn_type == 'concat'
+        self.attn_fuse = attn_fuse
         self.bidirectional_encoder = bidirectional
+        self.field_self_att = field_self_att
         self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
         self.output_size = vocab_size
         self.hidden_size = hidden_size
@@ -33,7 +35,7 @@ class DecoderRNN(BaseRNN):
         self.mask = mask
         self.embedding = embedding
         self.lmbda = lmbda
-        self.USE_CUDA = USE_CUDA
+        self.use_cuda = use_cuda
 
         # ----------------- params for directions ----------------- #
         self.W_dir = nn.Linear(hidden_size * 2, hidden_size)
@@ -56,7 +58,7 @@ class DecoderRNN(BaseRNN):
                 input_shape += hidden_size
 
         # NOTE: a single bias term for attention score e_ti if attn_type is 'concat'
-        self.We = nn.Linear(input_shape, hidden_size, bias=self.use_bias)
+        self.We = nn.Linear(input_shape, hidden_size, bias=(self.attn_type == 'concat'))
 
         self.Wf = nn.Linear(hidden_size, hidden_size, bias=False)  # for obtaining e from encoder field
         self.Wh = nn.Linear(hidden_size, hidden_size, bias=False)  # for obtaining e from decoder current state
@@ -88,7 +90,7 @@ class DecoderRNN(BaseRNN):
         return enc_output_selfatt, enc_field_selfatt
 
     def decode_step(self, input_ids, coverage, dec_hidden, enc_proj, batch_size, max_enc_len,
-                    enc_mask, enc_output_selfatt, enc_field_selfatt, embed_input, max_source_oov, f_matrix):
+                    enc_mask, enc_output_selfatt, enc_field_selfatt, embed_input, max_source_oov):
         dec_proj = self.Wh(dec_hidden).unsqueeze(1).expand_as(enc_proj)
 
         cov_proj = self.Wc(coverage.view(-1, 1)).view(batch_size, max_enc_len, -1)
@@ -97,7 +99,7 @@ class DecoderRNN(BaseRNN):
         # mask to -inf before applying softmax
         attn_scores = e_t.view(batch_size, max_enc_len)
         del e_t
-        attn_scores.data.masked_fill_(enc_mask.data.byte(), 0)
+        attn_scores.data.masked_fill_(enc_mask.data.byte(), 0)  # self.byte() == self.to(torch.uint8)
         attn_scores = F.softmax(attn_scores, dim=1)
 
         enc_output_context = attn_scores.unsqueeze(1).bmm(enc_output_selfatt).squeeze(1)
@@ -114,7 +116,7 @@ class DecoderRNN(BaseRNN):
         if max_source_oov > 0:
             # create OOV (but in-article) zero vectors
             ext_vocab = torch.zeros(batch_size, max_source_oov)
-            if self.USE_CUDA:
+            if self.use_cuda:
                 ext_vocab=ext_vocab.cuda()
             combined_vocab = torch.cat((weighted_Pvocab, ext_vocab), 1)
             del ext_vocab
@@ -125,18 +127,18 @@ class DecoderRNN(BaseRNN):
         # scatter article word probs to combined vocab prob.
         combined_vocab = combined_vocab.scatter_add(1, input_ids, weighted_attn)
 
-        if max_source_oov > 0:
-            print('dec_proj: {}'.format(dec_proj.size()))
-            print('attn_scores: {}'.format(attn_scores.size()))
-            print('p_vocab: {}'.format(p_vocab.size()))
-            print('p_gen: {}'.format(p_gen.size()))
-            print('weighted_Pvocab: {}'.format(weighted_Pvocab.size()))
-            print('weighted_attn: {}'.format(weighted_attn.size()))
-            print('max_source_oov: {}'.format(max_source_oov))
-            print('ext_vocab: {}'.format(ext_vocab.size()))
-            print('input_ids: {}'.format(input_ids.size()))
-            print('combined_vocab: {}'.format(combined_vocab.size()))
-            sys.exit(0)
+        # if max_source_oov > 0:
+        #     print('dec_proj: {}'.format(dec_proj.size()))
+        #     print('attn_scores: {}'.format(attn_scores.size()))
+        #     print('p_vocab: {}'.format(p_vocab.size()))
+        #     print('p_gen: {}'.format(p_gen.size()))
+        #     print('weighted_Pvocab: {}'.format(weighted_Pvocab.size()))
+        #     print('weighted_attn: {}'.format(weighted_attn.size()))
+        #     print('max_source_oov: {}'.format(max_source_oov))
+        #     print('ext_vocab: {}'.format(ext_vocab.size()))
+        #     print('input_ids: {}'.format(input_ids.size()))
+        #     print('combined_vocab: {}'.format(combined_vocab.size()))
+        #     sys.exit(0)
 
         return combined_vocab, attn_scores
 
@@ -151,7 +153,7 @@ class DecoderRNN(BaseRNN):
         targets, batch_size, max_length, max_enc_len = self._validate_args(targets, enc_state, enc_input, teacher_forcing_ratio)
         decoder_hidden = self._init_state(enc_state)
         coverage = torch.zeros(batch_size, max_enc_len)
-        if self.USE_CUDA:
+        if self.use_cuda:
             coverage = coverage.cuda()
 
         if self.hidden_type == 'emb':
@@ -160,22 +162,26 @@ class DecoderRNN(BaseRNN):
             enc_output = enc_hidden
         else:
             enc_output = torch.cat((enc_hidden, enc_input), -1)
-
-        print('enc_output: {}'.format(enc_output.size()))
+        # print('enc_output: {}'.format(enc_output.size()))
 
         enc_output_flat = enc_output.contiguous().view(batch_size * max_enc_len, -1)
-        print('enc_output_flat: {}'.format(enc_output_flat.size()))
+        # print('enc_output_flat: {}'.format(enc_output_flat.size()))
         enc_output_proj = self.We(enc_output_flat).view(batch_size, max_enc_len, -1)
 
         enc_field_flat = enc_field.view(batch_size * max_enc_len, -1)
-        print('enc_output_flat: {}'.format(enc_output_flat.size()))
+        # print('enc_output_flat: {}'.format(enc_output_flat.size()))
         enc_field_proj = self.Wf(enc_field_flat).view(batch_size, max_enc_len, -1)
 
         enc_proj = enc_output_proj + enc_field_proj
 
         # get link attention scores
-        f_matrix = self.get_matrix(enc_pos)
-        enc_output_selfatt, enc_field_selfatt = self.self_attn(f_matrix, enc_output, enc_field)
+        if self.field_self_att:
+            f_matrix = self.get_matrix(enc_pos)
+            enc_output_selfatt, enc_field_selfatt = self.self_attn(f_matrix, enc_output, enc_field)
+        else:
+            f_matrix = None
+            enc_output_selfatt = enc_output
+            enc_field_selfatt = enc_field
 
         if teacher_forcing_ratio:
             lm_loss, cov_loss = [], []
@@ -196,7 +202,7 @@ class DecoderRNN(BaseRNN):
 
                 combined_vocab, attn_scores = self.decode_step(input_ids, coverage, dec_hidden, enc_proj, batch_size,
                                                                max_enc_len, enc_mask, enc_output_selfatt, enc_field_selfatt,
-                                                               embed_input, max_source_oov, f_matrix)
+                                                               embed_input, max_source_oov)
                 # mask the output to account for PAD
                 target_mask_0 = target_id.ne(0).detach()
                 output = combined_vocab.gather(1, target_id).add_(sys.float_info.epsilon)
@@ -215,7 +221,7 @@ class DecoderRNN(BaseRNN):
 
             # add individual losses
             total_masked_loss = torch.cat(lm_loss, 1).sum(1).div(dec_lens) + self.lmbda * \
-                torch.stack(cov_loss, 1).sum(1).div(dec_lens)
+                                                                             torch.stack(cov_loss, 1).sum(1).div(dec_lens)
             return total_masked_loss
         else:
             return self.evaluate(targets, batch_size, max_length, max_source_oov, enc_output_selfatt, enc_field_selfatt,
@@ -234,11 +240,11 @@ class DecoderRNN(BaseRNN):
             combined_vocab, attn_scores = self.decode_step(input_ids, coverage,
                                                            dec_hidden.squeeze(1), enc_proj, batch_size, max_enc_len,
                                                            enc_mask, enc_output_selfatt, enc_field_selfatt,
-                                                           embed_input.squeeze(1), max_source_oov, f_matrix)
+                                                           embed_input.squeeze(1), max_source_oov)
 
             combined_vocab[:, self.unk_id] = 0  # NOTE: not allow decoder to output UNK
-            symbols = combined_vocab.topk(1)[1]
-            if self.mask == 1:
+            symbols = combined_vocab.topk(1)[1]  # (values, indices)
+            if self.mask:
                 tmp_mask = torch.zeros_like(enc_mask, dtype=torch.uint8)
                 for i in range(symbols.size(0)):
                     pos = (input_ids[i] == symbols[i]).nonzero()
@@ -264,7 +270,8 @@ class DecoderRNN(BaseRNN):
             decoder_hidden = _c
             coverage = coverage + attn_scores
         if fig:
-            return torch.stack(decoded_outputs, 1).squeeze(2), lengths.tolist(), f_matrix[0], \
+            self_matrix = f_matrix[0] if self.field_self_att else None
+            return torch.stack(decoded_outputs, 1).squeeze(2), lengths.tolist(), self_matrix, \
                    torch.stack(attn, 1).squeeze(2)[0]
         else:
             return torch.stack(decoded_outputs, 1).squeeze(2), lengths.tolist()
@@ -311,7 +318,7 @@ class DecoderRNN(BaseRNN):
                 raise ValueError("Teacher forcing has to be disabled (set 0) when no targets is provided.")
             # torch.set_grad_enabled(False)
             targets = torch.LongTensor([self.sos_id] * batch_size).view(batch_size, 1)
-            if self.USE_CUDA:
+            if self.use_cuda:
                 targets = targets.cuda()
             max_length = self.max_length
         else:

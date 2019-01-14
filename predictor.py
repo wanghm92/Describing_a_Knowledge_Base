@@ -163,11 +163,15 @@ class Predictor(object):
             else:
                 output.append(list_oovs[symbol-self.vocab.size])
         output = [i for i in output if i != '<PAD>' and i != '<EOS>' and i != '<SOS>']
-        print(self_matrix.size(), soft.size())
+        if self_matrix is not None:
+            print(self_matrix.size(), soft.size())
+        else:
+            print("position self attention is *** NOT *** available")
         pos = [str(i) for i in batch_pf[0].cpu().tolist()]
         combine = []
         for j in range(len(pos)):
             combine.append(visual[j] + " : " + pos[j])
-        self.showAttention(pos, combine, self_matrix.cpu(), 'self.png', 0)
+        if self_matrix is not None:
+            self.showAttention(pos, combine, self_matrix.cpu(), 'self.png', 0)
         self.showAttention(type, output[19:25], soft[19:25].cpu(), 'type.png', 1)
         # return output
