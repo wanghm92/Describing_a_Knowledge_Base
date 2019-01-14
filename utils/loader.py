@@ -69,7 +69,7 @@ class Vocabulary:
         return _o_field
 
     def vectorize_source(self, vector, table):
-        source_oov = {}
+        source_oov = {}  # {oov: id start from 0}
         _o_source, _source = [], []
         cnt = 0
         for word in vector:
@@ -83,6 +83,7 @@ class Vocabulary:
                     cnt += 1
                 else:
                     _o_source.append(source_oov[word] + self.size)
+                # NOTE: use field type embedding for OOV field values
                 _source.append(self.word2idx[table[word]])
         return _o_source, source_oov, _source
 
@@ -93,11 +94,12 @@ class Vocabulary:
                 _o_target.append(self.word2idx[word])
                 _target.append(self.word2idx[word])
             except KeyError:
+                # NOTE: use UNK for text words not in source OOVs
                 if word not in source_oov:
-                    # print(word)
                     _o_target.append(self.word2idx['<UNK>'])
                     _target.append(self.word2idx['<UNK>'])
                 else:
+                    # NOTE: use source_oov idx for OOV text words but appear in source OOVs
                     _o_target.append(source_oov[word] + self.size)
                     _target.append(self.word2idx[table[word]])
         return self.add_start_end(_o_target), self.add_start_end(_target)
@@ -116,6 +118,7 @@ class Table2text_seq:
         self.USE_CUDA = USE_CUDA
         self.device = torch.device("cuda" if USE_CUDA else "cpu")
 
+        # ----------------------- file names ------------------------- #
         if data_src == 'train':
             if self.type == 0:
                 path = "{}train_P.pkl".format(prefix)
@@ -134,11 +137,13 @@ class Table2text_seq:
         else:
             raise ValueError("Only train, valid, test data_src are supported")
 
+        # ----------------------- load triples and build vocabulary ------------------------- #
         if data_src == 'train' and (train_mode != 0 and train_mode != 4):  # training(0) and resume training(4)
             self.data = self.load_data_light(path)
         else:
             self.data = self.load_data(path)
             self.len = len(self.data)
+            # ----------------------- word to ids ------------------------- #
             self.corpus = self.batchfy()
 
         print("vocab size = {}".format(self.vocab.size))
@@ -170,6 +175,7 @@ class Table2text_seq:
                 self.max_p = curr_p_max
 
     def load_data(self, path):
+        # TODO: tokenize field and texts
         prefix = "{}/table2text_nlg/describe_kb/outputs".format(HOME)
         print("Loading data from {}".format(path))
         # (qkey, qitem, index)
@@ -195,8 +201,7 @@ class Table2text_seq:
                 self.text_len = len(target) + 2
             for key, value, index in old_source:
                 value = value.lower()  # NOTE: changed to lowercase strings
-                # change key into special tokens
-                tag = '<'+key+'>'
+                tag = '<'+key+'>'  # NOTE: change key into special tokens
                 source.append(value)
                 field.append(tag)
                 p_for.append(index)
@@ -273,7 +278,6 @@ class Table2text_seq:
         fields = []
         max_source_oov = 0
         for data in sample:
-            # print("data: {}".format(data))
             source = data[0]
             target = data[1]
             field = data[2]
@@ -283,6 +287,7 @@ class Table2text_seq:
             source_len.append(len(source))
             target_len.append(len(target) + 2)
 
+            # ----------------------- word to ids ------------------------- #
             _o_fields = self.vocab.vectorize_field(field)
             _o_source, source_oov, _source = self.vocab.vectorize_source(source, table)
             _o_target, _target = self.vocab.vectorize_target(target, source_oov, table)
@@ -291,13 +296,13 @@ class Table2text_seq:
             if max_source_oov < len(source_oov):
                 max_source_oov = len(source_oov)
             if self.data_src != 'train':
-                oovidx2word = {idx: word for word, idx in source_oov}
-                w2f={(idx+self.vocab.size): self.vocab.word2idx[table[word]] for word, idx in source_oov}
+                idx2word_oov = {idx: word for word, idx in source_oov}
+                w2f = {(idx+self.vocab.size): self.vocab.word2idx[table[word]] for word, idx in source_oov}
                 w2fs.append(w2f)
-                list_oovs.append(oovidx2word)
-                targets.append(target)
-                sources.append(source)
-                fields.append(field)
+                list_oovs.append(idx2word_oov)
+                targets.append(target)  # tokens
+                sources.append(source)  # tokens
+                fields.append(field)    # tokens
             batch_o_s.append(_o_source)
             batch_pf.append(p_for)
             batch_pb.append(p_bck)
