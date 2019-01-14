@@ -12,7 +12,7 @@ class DecoderRNN(BaseRNN):
 
     def __init__(self, vocab_size, embedding, embed_size, pemsize, sos_id, eos_id, unk_id, 
                  rnn_cell='gru', hidden_type='emb', attn_type='concat', attn_fuse='sum',
-                 bidirectional=True, field_self_att=True, mask=False, use_cuda=torch.cuda.is_available(),
+                 bidirectional=True, field_self_att=True, use_coverage=True, mask=False, use_cuda=True,
                  n_layers=1, input_dropout_p=0, dropout_p=0, max_len=100, lmbda=1.5):
         
         # NOTE
@@ -25,6 +25,7 @@ class DecoderRNN(BaseRNN):
         self.attn_fuse = attn_fuse
         self.bidirectional_encoder = bidirectional
         self.field_self_att = field_self_att
+        self.use_coverage = use_coverage
         self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
         self.output_size = vocab_size
         self.hidden_size = hidden_size
@@ -58,25 +59,25 @@ class DecoderRNN(BaseRNN):
                 input_shape += hidden_size
 
         # NOTE: a single bias term for attention score e_ti if attn_type is 'concat'
-        self.We = nn.Linear(input_shape, hidden_size, bias=(self.attn_type == 'concat'))
+        self.We = nn.Linear(input_shape, hidden_size)
 
-        self.Wf = nn.Linear(hidden_size, hidden_size, bias=False)  # for obtaining e from encoder field
-        self.Wh = nn.Linear(hidden_size, hidden_size, bias=False)  # for obtaining e from decoder current state
-        self.Wc = nn.Linear(1, hidden_size, bias=False)  # for obtaining e from context vector
-        self.v = nn.Linear(hidden_size, 1, bias=False)
+        self.Wf = nn.Linear(hidden_size, hidden_size)  # for obtaining e from encoder field
+        self.Wh = nn.Linear(hidden_size, hidden_size)  # for obtaining e from decoder current state
+        self.Wc = nn.Linear(1, hidden_size)  # for obtaining e from context vector
+        self.v = nn.Linear(hidden_size, 1)
 
         # ----------------- parameters for p_gen ----------------- #
         # NOTE: a single bias term for p_gen
-        self.w_e = nn.Linear(input_shape, 1, bias=True)     # for changing context vector into a scalar
-        self.w_f = nn.Linear(hidden_size, 1, bias=False)    # for changing context vector into a scalar
-        self.w_h = nn.Linear(hidden_size, 1, bias=False)    # for changing hidden state into a scalar
-        self.w_y = nn.Linear(embed_size,  1, bias=False)    # for changing input embedding into a scalar
+        self.w_e = nn.Linear(input_shape, 1)     # for changing context vector into a scalar
+        self.w_f = nn.Linear(hidden_size, 1)    # for changing context vector into a scalar
+        self.w_h = nn.Linear(hidden_size, 1)    # for changing hidden state into a scalar
+        self.w_y = nn.Linear(embed_size,  1)    # for changing input embedding into a scalar
 
         # ----------------- parameters for self attention ----------------- #
         self_size = pemsize * 2  # hidden_size +
-        self.Win = nn.Linear(self_size, self_size, bias=False)
-        self.Wout = nn.Linear(self_size, self_size, bias=False)
-        self.Wg = nn.Linear(self_size, self_size, bias=False)
+        self.Win = nn.Linear(self_size, self_size)
+        self.Wout = nn.Linear(self_size, self_size)
+        self.Wg = nn.Linear(self_size, self_size)
 
     def get_matrix(self, enc_pos):
         gin = torch.tanh(self.Win(enc_pos))
@@ -93,8 +94,11 @@ class DecoderRNN(BaseRNN):
                     enc_mask, enc_output_selfatt, enc_field_selfatt, embed_input, max_source_oov):
         dec_proj = self.Wh(dec_hidden).unsqueeze(1).expand_as(enc_proj)
 
-        cov_proj = self.Wc(coverage.view(-1, 1)).view(batch_size, max_enc_len, -1)
-        e_t = self.v(torch.tanh(enc_proj + dec_proj + cov_proj).view(batch_size*max_enc_len, -1))
+        if self.use_coverage:
+            cov_proj = self.Wc(coverage.view(-1, 1)).view(batch_size, max_enc_len, -1)
+            e_t = self.v(torch.tanh(enc_proj + dec_proj + cov_proj).view(batch_size*max_enc_len, -1))
+        else:
+            e_t = self.v(torch.tanh(enc_proj + dec_proj).view(batch_size*max_enc_len, -1))
 
         # mask to -inf before applying softmax
         attn_scores = e_t.view(batch_size, max_enc_len)
@@ -152,9 +156,12 @@ class DecoderRNN(BaseRNN):
 
         targets, batch_size, max_length, max_enc_len = self._validate_args(targets, enc_state, enc_input, teacher_forcing_ratio)
         decoder_hidden = self._init_state(enc_state)
-        coverage = torch.zeros(batch_size, max_enc_len)
-        if self.use_cuda:
-            coverage = coverage.cuda()
+        if self.use_coverage:
+            coverage = torch.zeros(batch_size, max_enc_len)
+            if self.use_cuda:
+                coverage = coverage.cuda()
+        else:
+            coverage = None
 
         if self.hidden_type == 'emb':
             enc_output = enc_input
@@ -211,17 +218,20 @@ class DecoderRNN(BaseRNN):
                 # print('_lm_loss: {}'.format(_lm_loss.size()))
                 lm_loss.append(_lm_loss)
 
-                coverage = coverage + attn_scores
-                # print('coverage: {}'.format(coverage.size()))
-                # Coverage Loss
-                # take minimum across both attn_scores and coverage
-                _cov_loss, _ = torch.stack((coverage, attn_scores), 2).min(2)
-                # print('_cov_loss: {}'.format(_cov_loss.size()))
-                cov_loss.append(_cov_loss.sum(1))
+                if self.use_coverage:
+                    coverage = coverage + attn_scores
+                    # print('coverage: {}'.format(coverage.size()))
+                    # Coverage Loss
+                    # take minimum across both attn_scores and coverage
+                    _cov_loss, _ = torch.stack((coverage, attn_scores), 2).min(2)
+                    # print('_cov_loss: {}'.format(_cov_loss.size()))
+                    cov_loss.append(_cov_loss.sum(1))
 
             # add individual losses
-            total_masked_loss = torch.cat(lm_loss, 1).sum(1).div(dec_lens) + self.lmbda * \
-                                                                             torch.stack(cov_loss, 1).sum(1).div(dec_lens)
+            total_masked_loss = torch.cat(lm_loss, 1).sum(1).div(dec_lens)
+            if self.use_coverage:
+                total_masked_loss = total_masked_loss + self.lmbda * torch.stack(cov_loss, 1).sum(1).div(dec_lens)
+
             return total_masked_loss
         else:
             return self.evaluate(targets, batch_size, max_length, max_source_oov, enc_output_selfatt, enc_field_selfatt,
@@ -268,7 +278,8 @@ class DecoderRNN(BaseRNN):
             # symbols.masked_fill_((symbols > self.vocab_size-1), self.unk_id)
             embed_input = self.embedding(symbols)
             decoder_hidden = _c
-            coverage = coverage + attn_scores
+            if self.use_coverage:
+                coverage = coverage + attn_scores
         if fig:
             self_matrix = f_matrix[0] if self.field_self_att else None
             return torch.stack(decoded_outputs, 1).squeeze(2), lengths.tolist(), self_matrix, \

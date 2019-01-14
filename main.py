@@ -21,7 +21,7 @@ from tensorboardX import SummaryWriter
 parser = argparse.ArgumentParser(description='pointer generator model')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
-parser.add_argument('--cuda', action='store_true',
+parser.add_argument('--cuda', action='store_false',
                     help='use CUDA')
 parser.add_argument('--save', type=str, default='params.pkl',
                     help='path to save the final model')
@@ -39,10 +39,11 @@ parser.add_argument('--attn_fuse', type=str, default='concat', choices=['sum', '
                     help='type of attention score aggregation: sum, prod')
 parser.add_argument('--hidden_type', type=str, default='emb', choices=['emb', 'rnn', 'both'],
                     help='encodings for attention layer: RNN hidden state(rnn) or word embeddings(emb) or (both)')
-parser.add_argument('--field_self_att', action='store_false',
+parser.add_argument('--field_self_att', action='store_true',
                     help='whether use field self-attention')
+parser.add_argument('--coverage', action='store_true',
+                    help='whether use coverage attention and loss')
 args = parser.parse_args()
-
 # --------------------------------------- save_file_dir ------------------------------------------- #
 save_file_dir = os.path.dirname(args.save)
 print("Models are going to be saved/loaded to/from: {}".format(save_file_dir))
@@ -57,7 +58,8 @@ if not os.path.exists(save_file_dir):
 torch.manual_seed(args.seed)
 if torch.cuda.is_available():
     if not args.cuda:
-        print("WARNING: You have- a CUDA device, so you should probably run with --cuda")
+        print(" *** WARNING *** CUDA device available, forcing to use")
+        args.cuda = torch.cuda.is_available()
     else:
         torch.cuda.manual_seed(args.seed)
 device = torch.device("cuda" if args.cuda else "cpu")
@@ -196,9 +198,8 @@ if __name__ == "__main__":
     decoder = DecoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, embed_size=config.emsize,
                          pemsize=config.pemsize, sos_id=3, eos_id=2, unk_id=1,
                          rnn_cell=config.cell, hidden_type=args.hidden_type, attn_type=args.attn_type,
-                         attn_fuse=args.attn_fuse,
-                         bidirectional=config.bidirectional, field_self_att=args.field_self_att, mask=args.mask,
-                         use_cuda=args.cuda,
+                         attn_fuse=args.attn_fuse, bidirectional=config.bidirectional, use_coverage=args.coverage,
+                         field_self_att=args.field_self_att, mask=args.mask, use_cuda=args.cuda,
                          input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers)
     model = Seq2seq(encoder, decoder).to(device)
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
