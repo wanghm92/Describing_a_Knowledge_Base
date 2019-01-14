@@ -43,16 +43,9 @@ parser.add_argument('--field_self_att', action='store_true',
                     help='whether use field self-attention')
 parser.add_argument('--coverage', action='store_true',
                     help='whether use coverage attention and loss')
+parser.add_argument('--field_concat_pos', action='store_true',
+                    help='whether concat pos embeddings to field embeddings for attention calculation')
 args = parser.parse_args()
-# --------------------------------------- save_file_dir ------------------------------------------- #
-save_file_dir = os.path.dirname(args.save)
-print("Models are going to be saved/loaded to/from: {}".format(save_file_dir))
-if not os.path.exists(save_file_dir):
-    print("save directory does not exist, mkdir ...")
-    os.mkdir(save_file_dir)
-    if not os.path.exists(os.path.join(save_file_dir, "evaluations")):
-        os.mkdir(os.path.join(save_file_dir, "evaluations"))
-
 # ------------------------------------- random seed and cuda -------------------------------------- #
 # Set the random seed manually for reproducibility.
 torch.manual_seed(args.seed)
@@ -63,6 +56,15 @@ if torch.cuda.is_available():
     else:
         torch.cuda.manual_seed(args.seed)
 device = torch.device("cuda" if args.cuda else "cpu")
+
+# --------------------------------------- save_file_dir ------------------------------------------- #
+save_file_dir = os.path.dirname(args.save)
+print("Models are going to be saved/loaded to/from: {}".format(save_file_dir))
+if not os.path.exists(save_file_dir):
+    print("save directory does not exist, mkdir ...")
+    os.mkdir(save_file_dir)
+    if not os.path.exists(os.path.join(save_file_dir, "evaluations")):
+        os.mkdir(os.path.join(save_file_dir, "evaluations"))
 
 # -------------------------------- Hyperparams and Tensorboard ------------------------------------ #
 config = Config()
@@ -194,12 +196,14 @@ if __name__ == "__main__":
     encoder = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, hidden_size=config.emsize,
                          pos_size=t_dataset.max_p, pemsize=config.pemsize, hidden_type=args.hidden_type,
                          input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers,
-                         bidirectional=config.bidirectional, rnn_cell=config.cell, variable_lengths=True)
+                         rnn_cell=config.cell, bidirectional=config.bidirectional,
+                         variable_lengths=True, field_concat_pos=args.field_concat_pos)
     decoder = DecoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, embed_size=config.emsize,
                          pemsize=config.pemsize, sos_id=3, eos_id=2, unk_id=1,
                          rnn_cell=config.cell, hidden_type=args.hidden_type, attn_type=args.attn_type,
                          attn_fuse=args.attn_fuse, bidirectional=config.bidirectional, use_coverage=args.coverage,
-                         field_self_att=args.field_self_att, mask=args.mask, use_cuda=args.cuda,
+                         field_self_att=args.field_self_att, field_concat_pos=args.field_concat_pos, mask=args.mask,
+                         use_cuda=args.cuda,
                          input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers)
     model = Seq2seq(encoder, decoder).to(device)
     optimizer = optim.Adam(model.parameters(), lr=config.lr)

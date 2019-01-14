@@ -12,8 +12,8 @@ class DecoderRNN(BaseRNN):
 
     def __init__(self, vocab_size, embedding, embed_size, pemsize, sos_id, eos_id, unk_id, 
                  rnn_cell='gru', hidden_type='emb', attn_type='concat', attn_fuse='sum',
-                 bidirectional=True, field_self_att=True, use_coverage=True, mask=False, use_cuda=True,
-                 n_layers=1, input_dropout_p=0, dropout_p=0, max_len=100, lmbda=1.5):
+                 bidirectional=True, use_coverage=True, field_self_att=True, field_concat_pos=False, mask=False,
+                 use_cuda=True, n_layers=1, input_dropout_p=0, dropout_p=0, max_len=100, lmbda=1.5):
         
         # NOTE
         hidden_size = embed_size
@@ -24,8 +24,9 @@ class DecoderRNN(BaseRNN):
         self.attn_type = attn_type
         self.attn_fuse = attn_fuse
         self.bidirectional_encoder = bidirectional
-        self.field_self_att = field_self_att
         self.use_coverage = use_coverage
+        self.field_self_att = field_self_att
+        self.field_concat_pos = field_concat_pos
         self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
         self.output_size = vocab_size
         self.hidden_size = hidden_size
@@ -49,6 +50,12 @@ class DecoderRNN(BaseRNN):
             multiplier += 2
         self.V = nn.Linear(hidden_size * multiplier, self.output_size)
 
+        # ----------------- parameters for self attention ----------------- #
+        self_size = pemsize * 2  # hidden_size +
+        self.Win = nn.Linear(self_size, self_size)
+        self.Wout = nn.Linear(self_size, self_size)
+        self.Wg = nn.Linear(self_size, self_size)
+
         # ----------------- params for attention ----------------- #
         # for obtaining e from encoder hidden
         input_shape = hidden_size
@@ -58,26 +65,25 @@ class DecoderRNN(BaseRNN):
             if self.hidden_type == 'both':
                 input_shape += hidden_size
 
-        # NOTE: a single bias term for attention score e_ti if attn_type is 'concat'
         self.We = nn.Linear(input_shape, hidden_size)
 
-        self.Wf = nn.Linear(hidden_size, hidden_size)  # for obtaining e from encoder field
+        # for obtaining e from encoder field
+        if self.field_concat_pos:
+            self.Wf = nn.Linear(hidden_size + self_size, hidden_size)
+        else:
+            self.Wf = nn.Linear(hidden_size, hidden_size)
+
         self.Wh = nn.Linear(hidden_size, hidden_size)  # for obtaining e from decoder current state
         self.Wc = nn.Linear(1, hidden_size)  # for obtaining e from context vector
         self.v = nn.Linear(hidden_size, 1)
 
         # ----------------- parameters for p_gen ----------------- #
-        # NOTE: a single bias term for p_gen
         self.w_e = nn.Linear(input_shape, 1)     # for changing context vector into a scalar
         self.w_f = nn.Linear(hidden_size, 1)    # for changing context vector into a scalar
         self.w_h = nn.Linear(hidden_size, 1)    # for changing hidden state into a scalar
         self.w_y = nn.Linear(embed_size,  1)    # for changing input embedding into a scalar
 
-        # ----------------- parameters for self attention ----------------- #
-        self_size = pemsize * 2  # hidden_size +
-        self.Win = nn.Linear(self_size, self_size)
-        self.Wout = nn.Linear(self_size, self_size)
-        self.Wg = nn.Linear(self_size, self_size)
+
 
     def get_matrix(self, enc_pos):
         gin = torch.tanh(self.Win(enc_pos))

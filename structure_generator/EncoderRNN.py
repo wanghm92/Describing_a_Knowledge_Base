@@ -6,11 +6,13 @@ from .baseRNN import BaseRNN
 
 class EncoderRNN(BaseRNN):
     def __init__(self, vocab_size, embedding, hidden_size, pos_size, pemsize, hidden_type='emb', input_dropout_p=0,
-                 dropout_p=0, n_layers=1, bidirectional=True, rnn_cell='gru', variable_lengths=True):
+                 dropout_p=0, n_layers=1, rnn_cell='gru',
+                 bidirectional=True, variable_lengths=True, field_concat_pos=False):
         super(EncoderRNN, self).__init__(vocab_size, hidden_size, input_dropout_p, dropout_p, n_layers, rnn_cell)
 
         self.hidden_type = hidden_type
         self.variable_lengths = variable_lengths
+        self.field_concat_pos = field_concat_pos
         self.pos_embedding = nn.Embedding(pos_size, pemsize, padding_idx=0)
         self.embedding = embedding
         self.rnn = self.rnn_cell((hidden_size + pemsize) * 2, hidden_size, n_layers, batch_first=True,
@@ -26,7 +28,8 @@ class EncoderRNN(BaseRNN):
         embed_pf = self.pos_embedding(batch_pf)
         embed_pb = self.pos_embedding(batch_pb)
         embed_pos = torch.cat((embed_pf, embed_pb), dim=2)
-        embed = torch.cat((embed_input, embed_field, embed_pos), dim=2)
+        embed_field_pos = torch.cat((embed_field, embed_pos), dim=2)
+        embed = torch.cat((embed_input, embed_field_pos), dim=2)
         embed = self.input_dropout(embed)
         if self.variable_lengths:
             embedded = nn.utils.rnn.pack_padded_sequence(embed, input_lengths, batch_first=True)
@@ -38,7 +41,10 @@ class EncoderRNN(BaseRNN):
         else:
             enc_outputs = None
 
-        return enc_outputs, embed_input, embed_field, embed_pos, enc_state, mask
+        if self.field_concat_pos:
+            return enc_outputs, embed_input, embed_field_pos, embed_pos, enc_state, mask
+        else:
+            return enc_outputs, embed_input, embed_field, embed_pos, enc_state, mask
 
 
 
