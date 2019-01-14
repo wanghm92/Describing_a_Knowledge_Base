@@ -18,6 +18,7 @@ class Seq2seq(nn.Module):
                 input_lengths=None, max_source_oov=0,
                 teacher_forcing_ratio=0,
                 w2fs=None, fig=False):
+        # target=batch_t, target_id=batch_o_t
 
         # enc_hidden, embed_input, embed_field, embed_pos, enc_state, mask
         enc_hidden, enc_input, enc_field, enc_pos, enc_state, mask = \
