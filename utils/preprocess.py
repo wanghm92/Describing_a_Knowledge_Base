@@ -46,10 +46,17 @@ class Read_file:
 
 
     def prepare(self, path):
+        """
+            (1) trim_and_filter_table
+            (2) filter fields using global min-count
+            (3) filter sentences with no table value mentioned
+            (4) filtering done for train, valid and test
+        """
         print("Parsing tables from {}".format(path))
         field_corpus = []
         old_targets = []
-        old_table = []
+        old_tables = []
+        # ----------------------- trim table values for the whole dataset ------------------------- #
         with open(path, 'r') as files:
             i = 0
             for line in files:
@@ -58,46 +65,48 @@ class Read_file:
                 temp_table = json.loads(line.strip('\n'))
                 # pp.pprint(temp_table)
 
-                # ----------------------- filter table values ------------------------- #
-                table, target, flag, field = self.turnc_sent(temp_table)
-                if flag:
+                table, target, retain, field = self.trim_and_filter_table(temp_table)
+                if retain:
                     old_targets.append(target)
-                    old_table.append({key: value for key, value in table.items() if key != "TEXT"})
+                    old_tables.append({key: value for key, value in table.items() if key != "TEXT"})
                     field_corpus.extend(field)
                     i += 1
                     if i == self.num_sample * 1.5:
                         break
 
-        # ----------------------- filter table fields by frequency ------------------------- #
+        # ----------------------- filter table fields by global frequency ------------------------- #
         fields = Counter(field_corpus)
         if self.min_freq_fields:
             fields = {word: freq for word, freq in fields.items() if freq >= self.min_freq_fields}
-        used_field = list(fields)
+        remaining_fields = list(fields)  # keys
 
+        # ----------------------- separate inputs (key, value, index) and outputs ------------------------- #
         sources = []
         targets = []
         j = 0
         print("Processing tables ...")
-        for i, table in enumerate(old_table):
+        for i, table in enumerate(old_tables):
             if i % 100 == 0:
                 sys.stdout.write("Processed {} tables\r".format(i))
-            keys = [key for key in table.keys() if key in used_field and key != "Name_ID"]  # filter field values
+            keys = [key for key in table.keys() if key in remaining_fields and key != "Name_ID"]  # filter field values
             index = 1
-            temp = [("Name_ID", table["Name_ID"], index)]
+            triples = [("Name_ID", table["Name_ID"], index)]
             index += 1
             order_values = []
             for key in keys:
                 for item in table[key]:
+                    # NOTE: duplicate values with different fields: retain only the 1st one
                     if item["mainsnak"] not in order_values:
-                        temp.append((key, item["mainsnak"], index))
+                        triples.append((key, item["mainsnak"], index))
                         order_values.append(item["mainsnak"])
                         if "qualifiers" in item:
                             qualifiers = item['qualifiers']
                             for qkey, qitems in qualifiers.items():
-                                if qkey in used_field:
+                                if qkey in remaining_fields:
+                                    # same qkey for all qitems
                                     for qitem in qitems:
                                         if qitems not in order_values:
-                                            temp.append((qkey, qitem, index))
+                                            triples.append((qkey, qitem, index))
                                             order_values.append(qitems)
                         index += 1
 
@@ -109,36 +118,38 @@ class Read_file:
                     continue
 
             # NOTE: discard samples with <5 fields for training
-            if self.type == 0 and len(temp) < 5:
+            if self.type == 0 and len(triples) < 5:
                 continue
             else:
-                # NOTE: discard samples with <3 fields for evaluation and testing
-                if len(temp) < 3:
+                # NOTE: discard samples with <3 fields for valid and test
+                if len(triples) < 3:
                     continue
 
             new_sent = []
             for sent in old_targets[i]:
                 for word in order_values:
-                    # NOTE: only keep sents with table values
+                    # NOTE: only keep sentences with table values for train, valid and test
                     if word in sent:
                         new_sent.extend(sent)
                         break
 
+            # NOTE: discard samples with <5 sentences for train, valid and test
             if len(new_sent) < 5:
                 continue
 
-            sources.append(temp)
+            sources.append(triples)
             j += 1
             targets.append(new_sent)
             if j == self.num_sample:
                 break
-            print(temp)
-            print(new_sent)
-            sys.exit(0)
+            # print(triples)
+            # print(new_sent)
+            # sys.exit(0)
         # pprint(sources)
         return sources, targets
 
     def ranksent(self, order_values, target):
+        """ Sort target sentences by the occurrence of any words in the table"""
         final_target = []
         target_dict = {}
         for j, sent in enumerate(target):
@@ -156,12 +167,16 @@ class Read_file:
             final_target.append(target[index])
         return final_target
 
-    def turnc_sent(self, table):
-        # print(table.keys())
+    def trim_and_filter_table(self, table):
+        """ parse one sample loaded from json
+            (1) reorder target sentence
+            (2) filter samples with < 5 field value words
+            (3) *** NOTE *** retain only fields type and values that appear in the texts
+            (4) separate text and fields
+        """
         values = set()
         order_values = [table["Name_ID"]]
         for key, items in table.items():
-            # print("{} --> {}\n".format(key, items))
             if key == "Name_ID" or key == "TEXT":
                 continue
             for item in items:
@@ -176,9 +191,11 @@ class Read_file:
                             if qitem not in order_values:
                                 order_values.append(qitems)
         target = table["TEXT"]
+
+        # --- reorder target sentences --- #
         target = self.ranksent(order_values, target)
 
-        used_value = set()
+        mentioned_values = set()
         final_sent = []
         final_target = []
         for sent in target:
@@ -190,10 +207,10 @@ class Read_file:
 
         for word in final_target:
             if word in values:
-                used_value.add(word)
+                mentioned_values.add(word)
 
         # NOTE: samples with < 5 field values are discarded for training
-        if self.type == 0 and len(used_value) < 5:
+        if self.type == 0 and len(mentioned_values) < 5:
             return None, None, False, None
 
         newinfobox = OrderedDict()
@@ -202,14 +219,15 @@ class Read_file:
         for key, items in table.items():
             if key == "Name_ID":
                 field.append(key)
-                newinfobox["Name_ID"] = items
+                newinfobox["Name_ID"] = items  # string
                 continue
             if key == "TEXT":
                 continue
             item_list = []
             for item in items:
                 new_value = {}
-                if item['mainsnak'] in used_value:
+                # NOTE: only retain fields appeared in target texts
+                if item['mainsnak'] in mentioned_values:
                     new_value['mainsnak'] = item['mainsnak']
                     update_value.add(item['mainsnak'])
                     field.append(key)
@@ -219,7 +237,8 @@ class Read_file:
                         for qkey, qitems in qualifiers.items():
                             qitem_list = []
                             for qitem in qitems:
-                                if qitem in used_value:
+                                # NOTE: only retain qualifiers appeared in target texts
+                                if qitem in mentioned_values:
                                     field.append(qkey)
                                     qitem_list.append(qitem)
                                     update_value.add(qitem)
