@@ -263,26 +263,28 @@ class Read_file:
         print("maxp: {}".format(self.maxp))
         if mode == 0:
             if self.type == 0:
-                path = "{}/train_P.pkl".format(prefix)
+                path = "{}/train_P".format(prefix)
             else:
-                path = "{}/train_A.pkl".format(prefix)
+                path = "{}/train_A".format(prefix)
         elif mode == 1:
             if self.type == 0:
-                path = "{}/valid_P.pkl".format(prefix)
+                path = "{}/valid_P".format(prefix)
             else:
-                path = "{}/valid_A.pkl".format(prefix)
+                path = "{}/valid_A".format(prefix)
         else:
             if self.type == 0:
-                path = "{}/test_P.pkl".format(prefix)
+                path = "{}/test_P".format(prefix)
             else:
-                path = "{}/test_A.pkl".format(prefix)
+                path = "{}/test_A".format(prefix)
         data = {
             "source": self.sources,
             "target": self.targets,
             "maxp": self.maxp
         }
-        with open(path, 'wb') as output:
-            pickle.dump(data, output)
+        with open("{}.pkl".format(path), 'wb') as fout:
+            pickle.dump(data, fout)
+        with open("{}.processed.json".format(path), 'w+') as fout:
+            json.dump(data, fout, indent=4)
 
 
 if __name__ == "__main__":
