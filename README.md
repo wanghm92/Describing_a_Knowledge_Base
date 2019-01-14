@@ -49,17 +49,17 @@ python preprocess.py --type 0
 #### Training
 Hyperparameter can be adjust in the Config class of main.py and choose whether person or animal using type.
 ```
-python main.py --cuda --mode 0 --type 0
+python main.py --mode 0 --type 0 --coverage --field_self_att
 ```
 
 #### Test
 Compute score:
 ```
-python main.py --cuda --mode 3
+python main.py --mode 3
 ```
 Predict single entity:
 ```
-python main.py --cuda --mode 1
+python main.py --mode 1
 ```
 
 ## Citation
