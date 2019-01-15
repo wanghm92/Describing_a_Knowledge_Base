@@ -79,9 +79,9 @@ if not os.path.exists(save_file_dir):
 # -------------------------------- Hyperparams and Tensorboard ------------------------------------ #
 config = Config()
 if args.type == 0:
-    config.batch_size = 64
-else:
     config.batch_size = 128
+else:
+    config.batch_size = 64
 
 summary_dir = os.path.join(save_file_dir, "summary")
 if not os.path.exists(summary_dir):
