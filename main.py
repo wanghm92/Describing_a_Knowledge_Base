@@ -35,14 +35,18 @@ parser.add_argument('--mask', action='store_true',
                     help='false(0)/true(1)')
 parser.add_argument('--attn_type', type=str, default='concat', choices=['concat', 'dot'],
                     help='type of attention score calculation: concat, dot')
-parser.add_argument('--attn_fuse', type=str, default='concat', choices=['sum', 'prod'],
+parser.add_argument('--attn_fuse', type=str, default='concat', choices=['concat', 'prod'],
                     help='type of attention score aggregation: sum, prod')
+parser.add_argument('--attn_level', type=int, default=1, choices=[1,2,3],
+                    help='levels of attention: 1, 2, 3')
 parser.add_argument('--hidden_type', type=str, default='emb', choices=['emb', 'rnn', 'both'],
                     help='encodings for attention layer: RNN hidden state(rnn) or word embeddings(emb) or (both)')
 parser.add_argument('--field_self_att', action='store_true',
                     help='whether use field self-attention')
-parser.add_argument('--coverage', action='store_true',
-                    help='whether use coverage attention and loss')
+parser.add_argument('--use_cov_attn', action='store_true',
+                    help='whether use coverage attention')
+parser.add_argument('--use_cov_loss', action='store_true',
+                    help='whether use coverage loss')
 parser.add_argument('--field_concat_pos', action='store_true',
                     help='whether concat pos embeddings to field embeddings for attention calculation')
 args = parser.parse_args()
@@ -201,7 +205,8 @@ if __name__ == "__main__":
     decoder = DecoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, embed_size=config.emsize,
                          pemsize=config.pemsize, sos_id=3, eos_id=2, unk_id=1,
                          rnn_cell=config.cell, hidden_type=args.hidden_type, attn_type=args.attn_type,
-                         attn_fuse=args.attn_fuse, bidirectional=config.bidirectional, use_coverage=args.coverage,
+                         attn_fuse=args.attn_fuse, bidirectional=config.bidirectional,
+                         use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss,
                          field_self_att=args.field_self_att, field_concat_pos=args.field_concat_pos, mask=args.mask,
                          use_cuda=args.cuda,
                          input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers)
