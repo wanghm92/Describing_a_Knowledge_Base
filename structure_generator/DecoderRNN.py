@@ -27,6 +27,7 @@ class DecoderRNN(BaseRNN):
         self.use_coverage = use_coverage
         self.field_self_att = field_self_att
         self.field_concat_pos = field_concat_pos
+        # TODO: input feeding
         self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
         self.output_size = vocab_size
         self.hidden_size = hidden_size
@@ -84,7 +85,6 @@ class DecoderRNN(BaseRNN):
         self.w_y = nn.Linear(embed_size,  1)    # for changing input embedding into a scalar
 
 
-
     def get_matrix(self, enc_pos):
         gin = torch.tanh(self.Win(enc_pos))
         gout = torch.tanh(self.Wout(enc_pos))
@@ -97,7 +97,7 @@ class DecoderRNN(BaseRNN):
         return enc_output_selfatt, enc_field_selfatt
 
     def decode_step(self, input_ids, coverage, dec_hidden, enc_proj, batch_size, max_enc_len,
-                    enc_mask, enc_output_selfatt, enc_field_selfatt, embed_input, max_source_oov):
+                    enc_mask, enc_output_trans, enc_field_trans, embed_input, max_source_oov):
         dec_proj = self.Wh(dec_hidden).unsqueeze(1).expand_as(enc_proj)
 
         if self.use_coverage:
@@ -112,8 +112,8 @@ class DecoderRNN(BaseRNN):
         attn_scores.data.masked_fill_(enc_mask.data.byte(), 0)  # self.byte() == self.to(torch.uint8)
         attn_scores = F.softmax(attn_scores, dim=1)
 
-        enc_output_context = attn_scores.unsqueeze(1).bmm(enc_output_selfatt).squeeze(1)
-        enc_field_context = attn_scores.unsqueeze(1).bmm(enc_field_selfatt).squeeze(1)
+        enc_output_context = attn_scores.unsqueeze(1).bmm(enc_output_trans).squeeze(1)
+        enc_field_context = attn_scores.unsqueeze(1).bmm(enc_field_trans).squeeze(1)
 
         # output proj calculation
         p_vocab = F.softmax(self.V(torch.cat((dec_hidden, enc_output_context, enc_field_context), 1)), dim=1)
@@ -155,7 +155,6 @@ class DecoderRNN(BaseRNN):
     def forward(self, max_source_oov=0, targets=None, targets_id=None, input_ids=None,
                 enc_hidden=None, enc_input=None, enc_state=None, enc_mask=None, enc_field=None, enc_pos=None,
                 teacher_forcing_ratio=None, w2fs=None, fig=False):
-        # TODO: add flag for optional field encodings to run pointer-generator baseline
         """
             target=batch_t, target_id=batch_o_t, input_ids=batch_o_s
         """
@@ -190,11 +189,11 @@ class DecoderRNN(BaseRNN):
         # get link attention scores
         if self.field_self_att:
             f_matrix = self.get_matrix(enc_pos)
-            enc_output_selfatt, enc_field_selfatt = self.self_attn(f_matrix, enc_output, enc_field)
+            enc_output_trans, enc_field_trans = self.self_attn(f_matrix, enc_output, enc_field)
         else:
             f_matrix = None
-            enc_output_selfatt = enc_output
-            enc_field_selfatt = enc_field
+            enc_output_trans = enc_output
+            enc_field_trans = enc_field
 
         if teacher_forcing_ratio:
             lm_loss, cov_loss = [], []
@@ -214,7 +213,7 @@ class DecoderRNN(BaseRNN):
                 embed_input = embed_inputs[:, step, :]
 
                 combined_vocab, attn_scores = self.decode_step(input_ids, coverage, dec_hidden, enc_proj, batch_size,
-                                                               max_enc_len, enc_mask, enc_output_selfatt, enc_field_selfatt,
+                                                               max_enc_len, enc_mask, enc_output_trans, enc_field_trans,
                                                                embed_input, max_source_oov)
                 # mask the output to account for PAD
                 target_mask_0 = target_id.ne(0).detach()
@@ -240,10 +239,10 @@ class DecoderRNN(BaseRNN):
 
             return total_masked_loss
         else:
-            return self.evaluate(targets, batch_size, max_length, max_source_oov, enc_output_selfatt, enc_field_selfatt,
+            return self.evaluate(targets, batch_size, max_length, max_source_oov, enc_output_trans, enc_field_trans,
                                  f_matrix, decoder_hidden, enc_mask, input_ids, coverage, enc_proj, max_enc_len, w2fs, fig)
 
-    def evaluate(self, targets, batch_size, max_length, max_source_oov, enc_output_selfatt, enc_field_selfatt, f_matrix,
+    def evaluate(self, targets, batch_size, max_length, max_source_oov, enc_output_trans, enc_field_trans, f_matrix,
                  decoder_hidden, enc_mask, input_ids, coverage, enc_proj, max_enc_len, w2fs, fig):
         lengths = np.array([max_length] * batch_size)
         decoded_outputs = []
@@ -255,7 +254,7 @@ class DecoderRNN(BaseRNN):
             dec_hidden, _c = self.rnn(embed_input, decoder_hidden)
             combined_vocab, attn_scores = self.decode_step(input_ids, coverage,
                                                            dec_hidden.squeeze(1), enc_proj, batch_size, max_enc_len,
-                                                           enc_mask, enc_output_selfatt, enc_field_selfatt,
+                                                           enc_mask, enc_output_trans, enc_field_trans,
                                                            embed_input.squeeze(1), max_source_oov)
 
             combined_vocab[:, self.unk_id] = 0  # NOTE: not allow decoder to output UNK
