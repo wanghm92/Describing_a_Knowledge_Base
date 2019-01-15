@@ -385,6 +385,8 @@ class DecoderRNN(BaseRNN):
                  max_enc_len, w2fs, fig):
 
         lengths = np.array([max_length] * batch_size)
+        finished = np.array([False] * batch_size)
+        losses = []
         decoded_outputs = []
         if fig:
             attn = []
@@ -399,7 +401,11 @@ class DecoderRNN(BaseRNN):
                                                             enc_hidden_vals, enc_input_vals, enc_field_vals)
 
             combined_vocab[:, self.unk_id] = 0  # NOTE: not allow decoder to output UNK
-            symbols = combined_vocab.topk(1)[1]  # (values, indices)
+
+            # greedy decoding: get word indices and logits
+            logits, symbols = combined_vocab.topk(1)
+            logits = logits.add_(sys.float_info.epsilon)
+
             if self.mask:
                 tmp_mask = torch.zeros_like(enc_mask, dtype=torch.uint8)
                 for i in range(symbols.size(0)):
@@ -411,10 +417,20 @@ class DecoderRNN(BaseRNN):
             if fig:
                 attn.append(attn_scores)
             decoded_outputs.append(symbols.clone())
-            eos_batches = symbols.data.eq(self.eos_id)
-            if eos_batches.dim() > 0:
-                eos_batches = eos_batches.cpu().view(-1).numpy()
-                update_idx = ((lengths > step) & eos_batches) != 0
+            eos_batch = symbols.data.eq(self.eos_id)
+
+            # record eval loss
+            target_mask_step = eos_batch.squeeze(1).detach()
+            batch_loss = logits.log().mul(-1) * target_mask_step.float()
+            losses.append(batch_loss.mean().item())
+
+            # check if all samples finished at the eos token
+            finished_step = np.array(eos_batch.squeeze(1).tolist(), dtype=bool)
+            finished = np.logical_or(finished, finished_step)
+
+            if eos_batch.dim() > 0:
+                eos_batch = eos_batch.cpu().view(-1).numpy()
+                update_idx = ((lengths > step) & eos_batch) != 0
                 lengths[update_idx] = len(decoded_outputs)
             # change unk to corresponding field
             for i in range(symbols.size(0)):
@@ -426,12 +442,16 @@ class DecoderRNN(BaseRNN):
             decoder_hidden_init = _c
             if self.use_cov_loss:
                 coverage = coverage + attn_scores
+
+            # stop if all finished
+            if all(finished):
+                break
         if fig:
             self_matrix = f_matrix[0] if self.field_self_att else None
-            return torch.stack(decoded_outputs, 1).squeeze(2), lengths.tolist(), self_matrix, \
+            return torch.stack(decoded_outputs, 1).squeeze(2), lengths.tolist(), losses, self_matrix, \
                    torch.stack(attn, 1).squeeze(2)[0]
         else:
-            return torch.stack(decoded_outputs, 1).squeeze(2), lengths.tolist()
+            return torch.stack(decoded_outputs, 1).squeeze(2), lengths.tolist(), losses
 
     def _init_state(self, enc_state):
         """ Initialize the encoder hidden state. """

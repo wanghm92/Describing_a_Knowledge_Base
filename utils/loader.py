@@ -46,8 +46,8 @@ class Vocabulary:
             self.size += 2
 
     def _build_word_index(self):
-        self.word2idx['<UNK>'] = 1
         self.word2idx['<PAD>'] = 0
+        self.word2idx['<UNK>'] = 1
 
         if self.start_end_tokens:
             self.word2idx['<EOS>'] = 2

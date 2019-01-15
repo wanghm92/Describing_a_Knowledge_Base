@@ -154,7 +154,8 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         # --------------------------------------- inference -------------------------------------------- #
         predictor = Predictor(model, v_dataset.vocab, args.cuda)
         print("Start Evaluating ...")
-        cand, ref = predictor.preeval_batch(v_dataset)
+        cand, ref, eval_loss = predictor.preeval_batch(v_dataset)
+        writer.add_scalar('valid/loss', eval_loss, epoch)
         print('Result:')
         print('ref: ', ref[1][0])
         print('cand: {}'.format(cand[1]))
@@ -261,7 +262,7 @@ if __name__ == "__main__":
         print("number of test examples: %d" % dataset.len)
 
         print("Start Evaluating ...")
-        cand, ref = predictor.preeval_batch
+        cand, ref, _ = predictor.preeval_batch
 
     # ----------------------------------- evaluation ---------------------------------------- #
     elif args.mode == 2:
@@ -275,7 +276,7 @@ if __name__ == "__main__":
         print("number of test examples: %d" % dataset.len)
 
         print("Start Evaluating ...")
-        cand, ref = predictor.preeval_batch(dataset)
+        cand, ref, _ = predictor.preeval_batch(dataset)
 
         print('Result:')
         print('ref: ', ref[1][0])
