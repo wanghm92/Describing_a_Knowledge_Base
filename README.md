@@ -55,11 +55,11 @@ python main.py --mode 0 --type 0 --field_self_att --use_cov_attn --use_cov_loss 
 #### Test
 Compute score:
 ```
-python main.py --mode 3 --save /PATH_TO_SAVED_MODEL
+python main.py --mode 2 --save /PATH_TO_SAVED_MODEL
 ```
 Predict single entity:
 ```
-python main.py --mode 1 --save /PATH_TO_SAVED_MODEL
+python main.py --mode 3 --save /PATH_TO_SAVED_MODEL
 ```
 
 ## Citation
