@@ -28,7 +28,7 @@ parser.add_argument('--save', type=str, default='params.pkl',
 parser.add_argument('--dataset', type=str, default='test', choices=['test', 'valid'],
                     help='type of dataset for prediction')
 parser.add_argument('--mode', type=int, default=0, choices=[0, 1, 2, 3, 4],
-                    help='train(0)/predict_individual(1)/predict_file(2)/compute score(3) or keep train (4)')
+                    help='train(0)/resume(1)/evaluation(2)/predict_individual(3)')
 parser.add_argument('--type', type=int, default=0, choices=[0, 1],
                     help='person(0)/animal(1)')
 parser.add_argument('--mask', action='store_true',
@@ -232,19 +232,75 @@ if __name__ == "__main__":
             print("number of training examples: %d" % t_dataset.len)
             print("Reading valid data ...")
             v_dataset = Table2text_seq('valid', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
+
             print("start training...")
             train_epoches(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1)
         except KeyboardInterrupt:
             print('-' * 89)
             print('Exiting from training early')
 
-    # ------------------------------------ predict one ----------------------------------------- #
+    # ----------------------------------- resume train ----------------------------------------- #
     elif args.mode == 1:
         model.load_state_dict(torch.load(args.save))
-        print("model restored")
+        load_epoch = int(args.save.split('.')[-1])
+        print("model restored from epoch-{}: {}".format(load_epoch, args.save))
+
+        try:
+            print("number of training examples: %d" % t_dataset.len)
+            print("Reading valid data ...")
+            v_dataset = Table2text_seq('valid', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
+
+            print("start training...")
+            train_epoches(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1, load_epoch=load_epoch)
+        except KeyboardInterrupt:
+            print('-' * 89)
+            print('Exiting from training early')
+        dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
+        print("Read $-{}-$ data")
+        predictor = Predictor(model, dataset.vocab, args.cuda)
+        print("number of test examples: %d" % dataset.len)
+
+        print("Start Evaluating ...")
+        cand, ref = predictor.preeval_batch
+
+    # ----------------------------------- evaluation ---------------------------------------- #
+    elif args.mode == 2:
+        model.load_state_dict(torch.load(args.save))
+        load_epoch = int(args.save.split('.')[-1])
+        print("model restored from epoch-{}: {}".format(load_epoch, args.save))
+
+        dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
+        print("Read $-{}-$ data")
+        predictor = Predictor(model, dataset.vocab, args.cuda)
+        print("number of test examples: %d" % dataset.len)
+
+        print("Start Evaluating ...")
+        cand, ref = predictor.preeval_batch(dataset)
+
+        print('Result:')
+        print('ref: ', ref[1][0])
+        print('cand: {}'.format(cand[1]))
+        cand_file_out = "{}/evaluations/{}.epoch_{}.cand.txt".format(save_file_dir, args.dataset, load_epoch)
+        with open(cand_file_out, 'w+') as fout:
+            for c in range(len(cand)):
+                fout.write("{}\n".format(cand[c+1]))
+        ref_file_out = "{}/evaluations/{}.ref.txt".format(save_file_dir, args.dataset)
+        with open(ref_file_out, 'w+') as fout:
+            for r in range(len(ref)):
+                fout.write("{}\n".format(ref[r+1][0]))
+        eval_f = Evaluate()
+        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=load_epoch)
+
+    # ------------------------------------ predict one ----------------------------------------- #
+    elif args.mode == 3:
+        model.load_state_dict(torch.load(args.save))
+        load_epoch = int(args.save.split('.')[-1])
+        print("model restored from epoch-{}: {}".format(load_epoch, args.save))
+
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=1)
         print("Read $-{}-$ data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
+
         while True:
             seq_str = input("Type index from (%d to %d) to continue:\n" %(0, dataset.len - 1))
             i = int(seq_str)
@@ -264,68 +320,3 @@ if __name__ == "__main__":
             print("Result: ")
             print(outputs)
             print('-'*120)
-
-    # ------------------------------------ predict file ---------------------------------------- #
-    elif args.mode == 2:
-        model.load_state_dict(torch.load(args.save))
-        load_epoch = int(args.save.split('.')[-1])
-        print("model restored")
-        dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
-        print("Read $-{}-$ data")
-        predictor = Predictor(model, dataset.vocab, args.cuda)
-        print("number of test examples: %d" % dataset.len)
-        print("Start Evaluating ...")
-        lines = predictor.predict_file(dataset)
-
-        print("Start writing")
-        f_out = open("{}/evaluations/Output{}".format(save_file_dir, filepost), 'w')
-        f_out.writelines(lines)
-        f_out.close()
-
-    # ----------------------------------- compute score ---------------------------------------- #
-    elif args.mode == 3:
-        model.load_state_dict(torch.load(args.save))
-        load_epoch = int(args.save.split('.')[-1])
-        print("model restored")
-        dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
-        print("Read $-{}-$ data")
-        predictor = Predictor(model, dataset.vocab, args.cuda)
-        print("number of test examples: %d" % dataset.len)
-        print("Start Evaluating ...")
-        cand, ref = predictor.preeval_batch(dataset)
-
-        print('Result:')
-        print('ref: ', ref[1][0])
-        print('cand: {}'.format(cand[1]))
-        cand_file_out = "{}/evaluations/{}.epoch_{}.cand.txt".format(save_file_dir, args.dataset, load_epoch)
-        with open(cand_file_out, 'w+') as fout:
-            for c in range(len(cand)):
-                fout.write("{}\n".format(cand[c+1]))
-        ref_file_out = "{}/evaluations/{}.ref.txt".format(save_file_dir, args.dataset)
-        with open(ref_file_out, 'w+') as fout:
-            for r in range(len(ref)):
-                fout.write("{}\n".format(ref[r+1][0]))
-        eval_f = Evaluate()
-        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=load_epoch)
-
-    # ----------------------------------- resume train ----------------------------------------- #
-    elif args.mode == 4:
-        # load and keep training
-        model.load_state_dict(torch.load(args.save))
-        load_epoch = int(args.save.split('.')[-1])
-        print("model restored from epoch-{}: {}".format(load_epoch, args.save))
-        try:
-            print("number of training examples: %d" % t_dataset.len)
-            print("Reading valid data ...")
-            v_dataset = Table2text_seq('valid', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
-            print("start training...")
-            train_epoches(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1, load_epoch=load_epoch)
-        except KeyboardInterrupt:
-            print('-' * 89)
-            print('Exiting from training early')
-        dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
-        print("Read $-{}-$ data")
-        predictor = Predictor(model, dataset.vocab, args.cuda)
-        print("number of test examples: %d" % dataset.len)
-        print("Start Evaluating ...")
-        cand, ref = predictor.preeval_batch

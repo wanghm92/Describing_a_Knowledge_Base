@@ -30,52 +30,6 @@ class Predictor(object):
         print(len(output))
         return ' '.join([i for i in output if i != '<PAD>' and i != '<EOS>' and i != '<SOS>'])
 
-    def overlap(self, line):
-        indexref = []
-        indexoutput = []
-        for word in line['sources']:
-            index = [i for i, j in enumerate(line['ref']) if j.lower() == word.lower()]
-            indexref.append(index)
-            index = [i for i, j in enumerate(line['output']) if j.lower() == word.lower()]
-            indexoutput.append(index)
-        line['indexref'] = indexref
-        line['indexoutput'] = indexoutput
-        new_table = []
-        for field in line['fields']:
-            new_table.append(field[field.find('<')+1:field.find('>')])
-        line['fields'] = new_table
-
-    def predict_file(self, dataset):
-        torch.set_grad_enabled(False)
-        lines = []
-        total_batches = len(dataset.corpus)
-        print("{} batches to be evaluated".format(total_batches))
-        for batch_idx in tqdm(range(total_batches)):
-            batch_s, batch_o_s, batch_f, batch_pf, batch_pb, sources, targets, fields, list_oovs, source_len, \
-                max_source_oov, w2fs = dataset.get_batch(batch_idx)
-            decoded_outputs, lengths = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
-                                                  input_lengths=source_len, max_source_oov=max_source_oov, w2fs=w2fs)
-            pos = batch_pf.tolist()
-            for j in range(len(lengths)):
-                line = {}
-                line['sources'] = sources[j]
-                line['fields'] = fields[j]
-                line['ref'] = targets[j]
-                line['pos'] = [p for p in pos[j] if p != 0]
-                out_seq = []
-                for k in range(lengths[j]):
-                    symbol = decoded_outputs[j][k].item()
-                    if symbol < self.vocab.size:
-                        out_seq.append(self.vocab.idx2word[symbol])
-                    else:
-                        out_seq.append(list_oovs[j][symbol-self.vocab.size])
-                out = self.post_process(out_seq)
-                line['output'] = out
-                self.overlap(line)
-                lines.append(str(line)+'\n')
-
-        return lines
-
     def preeval_batch(self, dataset):
         torch.set_grad_enabled(False)
         refs = {}
@@ -85,7 +39,7 @@ class Predictor(object):
         print("{} batches to be evaluated".format(total_batches))
         for batch_idx in tqdm(range(total_batches)):
             batch_s, batch_o_s, batch_f, batch_pf, batch_pb, sources, targets, fields, list_oovs, source_len, \
-            max_source_oov, w2fs = dataset.get_batch(batch_idx)
+                max_source_oov, w2fs = dataset.get_batch(batch_idx)
             decoded_outputs, lengths = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
                                                   input_lengths=source_len, max_source_oov=max_source_oov, w2fs=w2fs)
             for j in range(len(lengths)):
@@ -175,3 +129,50 @@ class Predictor(object):
             self.showAttention(pos, combine, self_matrix.cpu(), 'self.png', 0)
         self.showAttention(type, output[19:25], soft[19:25].cpu(), 'type.png', 1)
         # return output
+
+    # def overlap(self, line):
+    #     indexref = []
+    #     indexoutput = []
+    #     for word in line['sources']:
+    #         index = [i for i, j in enumerate(line['ref']) if j.lower() == word.lower()]
+    #         indexref.append(index)
+    #         index = [i for i, j in enumerate(line['output']) if j.lower() == word.lower()]
+    #         indexoutput.append(index)
+    #     line['indexref'] = indexref
+    #     line['indexoutput'] = indexoutput
+    #     new_table = []
+    #     for field in line['fields']:
+    #         new_table.append(field[field.find('<') + 1:field.find('>')])
+    #     line['fields'] = new_table
+    #
+    # def predict_file(self, dataset):
+    #     torch.set_grad_enabled(False)
+    #     lines = []
+    #     total_batches = len(dataset.corpus)
+    #     print("{} batches to be evaluated".format(total_batches))
+    #     for batch_idx in tqdm(range(total_batches)):
+    #         batch_s, batch_o_s, batch_f, batch_pf, batch_pb, sources, targets, fields, list_oovs, source_len, \
+    #         max_source_oov, w2fs = dataset.get_batch(batch_idx)
+    #         decoded_outputs, lengths = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
+    #                                               input_lengths=source_len, max_source_oov=max_source_oov,
+    #                                               w2fs=w2fs)
+    #         pos = batch_pf.tolist()
+    #         for j in range(len(lengths)):
+    #             line = {}
+    #             line['sources'] = sources[j]
+    #             line['fields'] = fields[j]
+    #             line['ref'] = targets[j]
+    #             line['pos'] = [p for p in pos[j] if p != 0]
+    #             out_seq = []
+    #             for k in range(lengths[j]):
+    #                 symbol = decoded_outputs[j][k].item()
+    #                 if symbol < self.vocab.size:
+    #                     out_seq.append(self.vocab.idx2word[symbol])
+    #                 else:
+    #                     out_seq.append(list_oovs[j][symbol - self.vocab.size])
+    #             out = self.post_process(out_seq)
+    #             line['output'] = out
+    #             self.overlap(line)
+    #             lines.append(str(line) + '\n')
+    #
+    #     return lines
