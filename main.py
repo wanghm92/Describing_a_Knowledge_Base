@@ -158,7 +158,7 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         print('Result:')
         print('ref: ', ref[1][0])
         print('cand: {}'.format(cand[1]))
-        eval_file_out = "{}/evaluations/valid.epoch_{}.cand.live.txt".format(save_file_dir, load_epoch)
+        eval_file_out = "{}/evaluations/valid.epoch_{}.cand.live.txt".format(save_file_dir, epoch)
         with open(eval_file_out, 'w+') as fout:
             for c in range(len(cand)):
                 fout.write("{}\n".format(cand[c+1]))
