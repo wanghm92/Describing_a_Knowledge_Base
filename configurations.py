@@ -5,7 +5,7 @@ class Config(object):
     nlayers = 1
     lr = 0.001
     epochs = 50
-    batch_size = 128
+    batch_size = 64
     dropout = 0
     directions = 2
     max_grad_norm = 10

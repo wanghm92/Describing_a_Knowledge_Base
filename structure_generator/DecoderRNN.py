@@ -111,9 +111,22 @@ class DecoderRNN(BaseRNN):
         f = gin.bmm(self.Wg(gout).transpose(1, 2))
         f_matrix = F.softmax(f, dim=2)
 
-        enc_hidden_selfatt = torch.bmm(f_matrix, enc_hidden)
-        enc_input_selfatt = torch.bmm(f_matrix, enc_input)
-        enc_field_selfatt = torch.bmm(f_matrix, enc_field)
+        if self.attn_level == 3:
+            enc_hidden_selfatt = torch.bmm(f_matrix, enc_hidden)
+            enc_input_selfatt = torch.bmm(f_matrix, enc_input)
+            enc_field_selfatt = torch.bmm(f_matrix, enc_field)
+        elif self.attn_level == 2:
+            enc_field_selfatt = torch.bmm(f_matrix, enc_field)
+            if self.attn_src == 'rnn':
+                enc_hidden_selfatt = torch.bmm(f_matrix, enc_hidden)
+                enc_input_selfatt = enc_input
+            elif self.attn_src == 'emb':
+                enc_hidden_selfatt = enc_hidden
+                enc_input_selfatt = torch.bmm(f_matrix, enc_input)
+        else:
+            enc_hidden_selfatt = torch.bmm(f_matrix, enc_hidden)
+            enc_input_selfatt = enc_input
+            enc_field_selfatt = enc_field
 
         return f_matrix, enc_hidden_selfatt, enc_input_selfatt, enc_field_selfatt
 
