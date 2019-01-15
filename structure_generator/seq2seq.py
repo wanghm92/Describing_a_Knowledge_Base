@@ -21,7 +21,7 @@ class Seq2seq(nn.Module):
         # target=batch_t, target_id=batch_o_t
 
         # enc_hidden, embed_input, embed_field, embed_pos, enc_state, mask
-        enc_hidden, enc_input, enc_field, enc_pos, enc_state, mask = \
+        enc_hidden, enc_input, enc_field, enc_pos, enc_state, enc_mask = \
             self.encoder(batch_s, batch_f, batch_pf, batch_pb, input_lengths)
 
         result = self.decoder(max_source_oov=max_source_oov,
@@ -31,7 +31,7 @@ class Seq2seq(nn.Module):
                               enc_hidden=enc_hidden,
                               enc_input=enc_input,
                               enc_state=enc_state,
-                              enc_mask=mask,
+                              enc_mask=enc_mask,
                               enc_field=enc_field,
                               enc_pos=enc_pos,
                               teacher_forcing_ratio=teacher_forcing_ratio,

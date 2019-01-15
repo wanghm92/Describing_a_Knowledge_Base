@@ -20,7 +20,7 @@ class EncoderRNN(BaseRNN):
     def forward(self, batch_s, batch_f, batch_pf, batch_pb, input_lengths=None):
 
         # get mask for location of PAD
-        mask = batch_s.eq(0).detach()
+        enc_mask = batch_s.eq(0).detach()
 
         embed_input = self.embedding(batch_s)
         embed_field = self.embedding(batch_f)
@@ -41,6 +41,6 @@ class EncoderRNN(BaseRNN):
             enc_outputs, _ = nn.utils.rnn.pad_packed_sequence(enc_hidden, batch_first=True)
 
         if self.field_concat_pos:
-            return enc_outputs, embed_input, embed_field_pos, embed_pos, enc_state, mask
+            return enc_outputs, embed_input, embed_field_pos, embed_pos, enc_state, enc_mask
         else:
-            return enc_outputs, embed_input, embed_field, embed_pos, enc_state, mask
+            return enc_outputs, embed_input, embed_field, embed_pos, enc_state, enc_mask

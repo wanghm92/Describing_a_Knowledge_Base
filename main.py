@@ -11,7 +11,7 @@ from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq
 from configurations import Config, ConfigTest
 from eval import Evaluate
-import random, os
+import random, os, pprint
 from tensorboardX import SummaryWriter
 
 # -------------------------------------------------------------------------------------------------- #
@@ -36,7 +36,7 @@ parser.add_argument('--mask', action='store_true',
 parser.add_argument('--attn_type', type=str, default='concat', choices=['concat', 'dot'],
                     help='type of attention score calculation: concat, dot')
 parser.add_argument('--attn_fuse', type=str, default='concat', choices=['concat', 'prod'],
-                    help='type of attention score aggregation: sum, prod')
+                    help='type of attention score aggregation: concat, prod')
 parser.add_argument('--attn_level', type=int, default=2, choices=[1, 2, 3],
                     help='levels of attention: 1(hidden only), 2(hidden+field), 3(hidden+word+field) hidden=rnn/emb')
 parser.add_argument('--attn_src', type=str, default='emb', choices=['emb', 'rnn'],
@@ -52,8 +52,8 @@ parser.add_argument('--field_concat_pos', action='store_true',
 args = parser.parse_args()
 
 # ------------------------------------- checking attn_src -------------------------------------- #
-if args.attn_level == 3 and args.attn_src == 'emb':
-    print(" *** WARNING *** args.attn_level == 3 and args.attn_src == 'emb', forcing attn_src to 'rnn'")
+if args.attn_level != 2 and args.attn_src == 'emb':
+    print(" *** WARNING *** args.attn_level != 2 and args.attn_src == 'emb', forcing attn_src to 'rnn'")
     args.attn_src = 'rnn'
 
 # ------------------------------------- random seed and cuda -------------------------------------- #
@@ -94,6 +94,7 @@ if args.type == 1:
 else:
     filepost += "_P.txt"
 
+pprint.pprint(vars(args), indent=2)
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------ Training Functions ------------------------------------------ #
 # -------------------------------------------------------------------------------------------------- #
