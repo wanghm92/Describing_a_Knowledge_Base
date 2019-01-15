@@ -152,9 +152,9 @@ class Table2text_seq:
         print("Loading data $LIGHT$ from {}".format(path))
         prefix = "{}/table2text_nlg/describe_kb/outputs".format(HOME)
         if self.type == 0:
-            vocab_path_pkl = "{}/wikibio_vocab.pkl".format(prefix)
+            vocab_path_pkl = "{}/dkb_vocab.pkl".format(prefix)
         else:
-            vocab_path_pkl = "{}/wikibio_vocab_D.pkl".format(prefix)
+            vocab_path_pkl = "{}/dkb_vocab_D.pkl".format(prefix)
         print("loading vocab ...")
         with open(vocab_path_pkl, 'rb') as fin:
             data = pickle.load(fin)
@@ -168,7 +168,7 @@ class Table2text_seq:
         print("{} samples to be processed".format(len(old_sources)))
         for idx, old_source in enumerate(tqdm(old_sources)):
             p_for = []
-            for key, value, pos, rpos in old_source:
+            for key, value, pos in old_source:
                 p_for.append(pos)
             curr_p_max = max(p_for) + 1
             if self.max_p < curr_p_max:
