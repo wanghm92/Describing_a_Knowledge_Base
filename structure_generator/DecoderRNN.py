@@ -85,16 +85,14 @@ class DecoderRNN(BaseRNN):
         self.w_y = nn.Linear(embed_size,  1)    # for changing input embedding into a scalar
 
 
-    def get_matrix(self, enc_pos):
+    def position_self_attention(self, enc_pos, enc_output, enc_field):
         gin = torch.tanh(self.Win(enc_pos))
         gout = torch.tanh(self.Wout(enc_pos))
         f = gin.bmm(self.Wg(gout).transpose(1, 2))
-        return F.softmax(f, dim=2)
-
-    def self_attn(self, f_matrix, enc_output, enc_field):
+        f_matrix = F.softmax(f, dim=2)
         enc_output_selfatt = torch.bmm(f_matrix, enc_output)
         enc_field_selfatt = torch.bmm(f_matrix, enc_field)
-        return enc_output_selfatt, enc_field_selfatt
+        return f_matrix, enc_output_selfatt, enc_field_selfatt
 
     def decode_step(self, input_ids, coverage, dec_hidden, enc_proj, batch_size, max_enc_len,
                     enc_mask, enc_output_trans, enc_field_trans, embed_input, max_source_oov):
@@ -188,8 +186,7 @@ class DecoderRNN(BaseRNN):
 
         # get link attention scores
         if self.field_self_att:
-            f_matrix = self.get_matrix(enc_pos)
-            enc_output_trans, enc_field_trans = self.self_attn(f_matrix, enc_output, enc_field)
+            f_matrix, enc_output_trans, enc_field_trans = self.position_self_attention(enc_pos, enc_output, enc_field)
         else:
             f_matrix = None
             enc_output_trans = enc_output
