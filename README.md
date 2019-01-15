@@ -49,7 +49,7 @@ python preprocess.py --type 0
 #### Training
 Hyperparameter can be adjust in the Config class of main.py and choose whether person or animal using type.
 ```
-python main.py --mode 0 --type 0 --save /PATH_TO_SAVE_MODELS --coverage --field_self_att
+python main.py --mode 0 --type 0 --field_self_att --use_cov_attn --use_cov_loss --save /PATH_TO_SAVE_MODELS
 ```
 
 #### Test
