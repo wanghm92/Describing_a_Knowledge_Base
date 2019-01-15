@@ -11,8 +11,9 @@ from .baseRNN import BaseRNN
 class DecoderRNN(BaseRNN):
 
     def __init__(self, vocab_size, embedding, embed_size, pemsize, sos_id, eos_id, unk_id, 
-                 rnn_cell='gru', hidden_type='emb', attn_type='concat', attn_fuse='sum', bidirectional=True,
-                 use_cov_loss=True, use_cov_attn=True, field_self_att=True, field_concat_pos=False, mask=False,
+                 rnn_cell='gru', directions=2,
+                 attn_src='emb', attn_type='concat', attn_fuse='sum', attn_level=2,
+                 use_cov_loss=True, use_cov_attn=True, field_self_att=False, field_concat_pos=False, mask=False,
                  use_cuda=True, n_layers=1, input_dropout_p=0, dropout_p=0, max_len=100, lmbda=1.5):
         
         # NOTE
@@ -20,10 +21,11 @@ class DecoderRNN(BaseRNN):
         
         super(DecoderRNN, self).__init__(vocab_size, hidden_size, input_dropout_p, dropout_p, n_layers, rnn_cell)
 
-        self.hidden_type = hidden_type
+        self.attn_src = attn_src
         self.attn_type = attn_type
-        self.attn_fuse = attn_fuse
-        self.bidirectional_encoder = bidirectional
+        self.attn_fuse = attn_fuse # TODO: unused
+        self.attn_level = attn_level
+        self.directions = directions
         self.use_cov_loss = use_cov_loss
         self.use_cov_attn = use_cov_attn
         self.field_self_att = field_self_att
@@ -42,15 +44,7 @@ class DecoderRNN(BaseRNN):
         self.use_cuda = use_cuda
 
         # ----------------- params for directions ----------------- #
-        self.W_dir = nn.Linear(hidden_size * 2, hidden_size)
-
-        # ----------------- params for output ----------------- #
-        multiplier = 3
-        if self.hidden_type == 'rnn':
-            multiplier += 1
-        if self.hidden_type == 'both':
-            multiplier += 2
-        self.V = nn.Linear(hidden_size * multiplier, self.output_size)
+        self.W_enc_state = nn.Linear(hidden_size * 2, hidden_size)
 
         # ----------------- parameters for self attention ----------------- #
         self_size = pemsize * 2  # hidden_size +
@@ -59,68 +53,160 @@ class DecoderRNN(BaseRNN):
         self.Wg = nn.Linear(self_size, self_size)
 
         # ----------------- params for attention ----------------- #
-        # for obtaining e from encoder hidden
-        input_shape = hidden_size
-        if self.hidden_type != 'emb':
-            if self.bidirectional_encoder:
-                input_shape *= 2
-            if self.hidden_type == 'both':
-                input_shape += hidden_size
+        self.v = nn.Linear(hidden_size, 1)
+        self.Wd = nn.Linear(hidden_size, hidden_size)  # for obtaining e from decoder current state
 
-        self.We = nn.Linear(input_shape, hidden_size)
+        # for obtaining e from encoder hidden (complicated but to avoid idle layers)
+        if self.attn_level == 3:
+            self.We = nn.Linear(hidden_size, hidden_size)
+            self.Wr = nn.Linear(hidden_size * self.directions, hidden_size)
+        elif self.attn_level == 2:
+            if self.attn_src == 'emb':
+                self.We = nn.Linear(hidden_size, hidden_size)
+            elif self.attn_src == 'rnn':
+                self.Wr = nn.Linear(hidden_size * self.directions, hidden_size)
+        else:
+            # NOTE: assume to use encoder rnn hidden states when attn_level == 1
+            self.Wr = nn.Linear(hidden_size * self.directions, hidden_size)
 
         # for obtaining e from encoder field
-        if self.field_concat_pos:
-            self.Wf = nn.Linear(hidden_size + self_size, hidden_size)
-        else:
-            self.Wf = nn.Linear(hidden_size, hidden_size)
+        if self.attn_level > 1:
+            if self.field_concat_pos:
+                self.Wf = nn.Linear(hidden_size + self_size, hidden_size)
+            else:
+                self.Wf = nn.Linear(hidden_size, hidden_size)
 
-        self.Wh = nn.Linear(hidden_size, hidden_size)  # for obtaining e from decoder current state
-        self.Wc = nn.Linear(1, hidden_size)  # for obtaining e from context vector
-        self.v = nn.Linear(hidden_size, 1)
+        # for obtaining e from context vector
+        if self.use_cov_loss:
+            self.Wc = nn.Linear(1, hidden_size)
+
+        # ----------------- params for output ----------------- #
+        multiplier = 1 + self.attn_level + self.directions
+        self.V = nn.Linear(hidden_size * multiplier, self.output_size)
 
         # ----------------- parameters for p_gen ----------------- #
-        self.w_e = nn.Linear(input_shape, 1)     # for changing context vector into a scalar
+        self.w_e = nn.Linear(hidden_size, 1)     # for changing context vector into a scalar
+        self.w_r = nn.Linear(hidden_size * self.directions, 1)     # for changing context vector into a scalar
         self.w_f = nn.Linear(hidden_size, 1)    # for changing context vector into a scalar
-        self.w_h = nn.Linear(hidden_size, 1)    # for changing hidden state into a scalar
+        self.w_d = nn.Linear(hidden_size, 1)    # for changing hidden state into a scalar
         self.w_y = nn.Linear(embed_size,  1)    # for changing input embedding into a scalar
 
 
-    def position_self_attention(self, enc_pos, enc_output, enc_field):
+    def _pos_self_attn(self, enc_pos, enc_hidden, enc_input, enc_field):
         """ compute the self-attentive encoder output and field encodings"""
+
         gin = torch.tanh(self.Win(enc_pos))
         gout = torch.tanh(self.Wout(enc_pos))
         f = gin.bmm(self.Wg(gout).transpose(1, 2))
         f_matrix = F.softmax(f, dim=2)
-        enc_output_selfatt = torch.bmm(f_matrix, enc_output)
+
+        enc_hidden_selfatt = torch.bmm(f_matrix, enc_hidden)
+        enc_input_selfatt = torch.bmm(f_matrix, enc_input)
         enc_field_selfatt = torch.bmm(f_matrix, enc_field)
-        return f_matrix, enc_output_selfatt, enc_field_selfatt
 
-    def decode_step(self, input_ids, coverage, dec_hidden, enc_proj, batch_size, max_enc_len,
-                    enc_mask, enc_output_trans, enc_field_trans, embed_input, max_source_oov):
+        return f_matrix, enc_hidden_selfatt, enc_input_selfatt, enc_field_selfatt
 
-        dec_proj = self.Wh(dec_hidden)
-        dec_proj_stack = dec_proj.unsqueeze(1).expand_as(enc_proj)
+    def _get_enc_proj(self, enc_hidden, enc_input, enc_field, batch_size, max_enc_len):
+
+        # TODO: simplify this chunk
+        if self.attn_level == 3:
+            enc_hidden_flat = enc_hidden.contiguous().view(batch_size * max_enc_len, -1)
+            # print('enc_hidden_flat: {}'.format(enc_hidden_flat.size()))
+            enc_hidden_proj = self.Wr(enc_hidden_flat).view(batch_size, max_enc_len, -1)
+
+            enc_input_flat = enc_input.contiguous().view(batch_size * max_enc_len, -1)
+            # print('enc_input_flat: {}'.format(enc_input_flat.size()))
+            enc_input_proj = self.We(enc_input_flat).view(batch_size, max_enc_len, -1)
+        elif self.attn_level == 2:
+            if self.attn_src == 'emb':
+                enc_hidden_proj = None
+                enc_input_flat = enc_input.contiguous().view(batch_size * max_enc_len, -1)
+                # print('enc_input_flat: {}'.format(enc_input_flat.size()))
+                enc_input_proj = self.We(enc_input_flat).view(batch_size, max_enc_len, -1)
+            elif self.attn_src == 'rnn':
+                enc_hidden_flat = enc_hidden.contiguous().view(batch_size * max_enc_len, -1)
+                # print('enc_hidden_flat: {}'.format(enc_hidden_flat.size()))
+                enc_hidden_proj = self.Wr(enc_hidden_flat).view(batch_size, max_enc_len, -1)
+                enc_input_proj = None
+        else:
+            enc_hidden_flat = enc_hidden.contiguous().view(batch_size * max_enc_len, -1)
+            # print('enc_hidden_flat: {}'.format(enc_hidden_flat.size()))
+            enc_hidden_proj = self.Wr(enc_hidden_flat).view(batch_size, max_enc_len, -1)
+            enc_input_proj = None
+
+        if self.attn_level > 1:
+            enc_field_flat = enc_field.view(batch_size * max_enc_len, -1)
+            # print('enc_field_flat: {}'.format(enc_field_flat.size()))
+            enc_field_proj = self.Wf(enc_field_flat).view(batch_size, max_enc_len, -1)
+        else:
+            enc_field_proj = None
+
+        return enc_hidden_proj, enc_input_proj, enc_field_proj
+
+    def _attn_score(self, batch_size, max_enc_len, coverage, dec_hidden, enc_hidden_proj, enc_input_proj, enc_field_proj):
+
+        dec_proj = self.Wd(dec_hidden)
+        dec_proj_stack = dec_proj.unsqueeze(1).expand_as(enc_hidden_proj)
+
+        if self.attn_level == 3:
+            enc_proj = enc_hidden_proj + enc_input_proj + enc_field_proj
+        elif self.attn_level == 2:
+            if self.attn_src == 'emb':
+                enc_proj = enc_input_proj + enc_field_proj
+            elif self.attn_src == 'rnn':
+                enc_proj = enc_hidden_proj + enc_field_proj
+        else:
+            enc_proj = enc_hidden_proj
+
+        attention_source = dec_proj_stack + enc_proj
 
         if self.use_cov_attn:
             cov_proj = self.Wc(coverage.view(-1, 1)).view(batch_size, max_enc_len, -1)
-            e_t = self.v(torch.tanh(enc_proj + dec_proj_stack + cov_proj).view(batch_size*max_enc_len, -1))
-        else:
-            e_t = self.v(torch.tanh(enc_proj + dec_proj_stack).view(batch_size*max_enc_len, -1))
+            attention_source += cov_proj
 
+        e_t = self.v(torch.tanh(attention_source).view(batch_size*max_enc_len, -1))
         # mask to -inf before applying softmax
         attn_scores = e_t.view(batch_size, max_enc_len)
         del e_t
+
+        return attn_scores
+
+    def _decode_step(self,
+                     batch_size, input_ids, coverage, max_source_oov,
+                     dec_hidden,
+                     enc_mask, embed_input, max_enc_len,
+                     enc_hidden_proj, enc_input_proj, enc_field_proj,
+                     enc_hidden_trans, enc_input_trans, enc_field_trans
+                     ):
+
+        attn_scores = self._attn_score()
         attn_scores.data.masked_fill_(enc_mask.data.byte(), 0)  # self.byte() == self.to(torch.uint8)
         attn_scores = F.softmax(attn_scores, dim=1)
 
-        enc_output_context = attn_scores.unsqueeze(1).bmm(enc_output_trans).squeeze(1)
-        enc_field_context = attn_scores.unsqueeze(1).bmm(enc_field_trans).squeeze(1)
+        if self.attn_level == 3:
+            enc_hidden_context = attn_scores.unsqueeze(1).bmm(enc_hidden_trans).squeeze(1)
+            enc_input_context = attn_scores.unsqueeze(1).bmm(enc_input_trans).squeeze(1)
+            enc_field_context = attn_scores.unsqueeze(1).bmm(enc_field_trans).squeeze(1)
+            enc_output_context = torch.cat((enc_hidden_context, enc_input_context, enc_field_context), 1)
+            enc_context_proj = self.w_r(enc_hidden_context) + self.w_e(enc_input_context) + self.w_f(enc_field_context)
+
+        elif self.attn_level == 2:
+            enc_field_context = attn_scores.unsqueeze(1).bmm(enc_field_trans).squeeze(1)
+            if self.attn_src == 'emb':
+                enc_output_temp = attn_scores.unsqueeze(1).bmm(enc_input_trans).squeeze(1)
+                enc_context_proj = self.w_e(enc_output_temp) + self.w_f(enc_field_context)
+            elif self.attn_src == 'rnn':
+                enc_output_temp = attn_scores.unsqueeze(1).bmm(enc_hidden_trans).squeeze(1)
+                enc_context_proj = self.w_r(enc_output_temp) + self.w_f(enc_field_context)
+            enc_output_context = torch.cat((enc_output_temp, enc_field_context), 1)
+        else:
+            enc_output_context = attn_scores.unsqueeze(1).bmm(enc_hidden_trans).squeeze(1)
+            enc_context_proj = self.w_r(enc_output_context)
 
         # output proj calculation
-        p_vocab = F.softmax(self.V(torch.cat((dec_hidden, enc_output_context, enc_field_context), 1)), dim=1)
+        p_vocab = F.softmax(self.V(torch.cat((dec_hidden, enc_output_context), 1)), dim=1)
         # p_gen calculation
-        p_gen = torch.sigmoid(self.w_e(enc_output_context) + self.w_f(enc_field_context) + self.w_h(dec_hidden) + self.w_y(embed_input))
+        p_gen = torch.sigmoid(enc_context_proj + self.w_d(dec_hidden) + self.w_y(embed_input))
         p_gen = p_gen.view(-1, 1)
         weighted_Pvocab = p_vocab * p_gen
         weighted_attn = (1-p_gen) * attn_scores
@@ -175,30 +261,17 @@ class DecoderRNN(BaseRNN):
         else:
             coverage = None
 
-        if self.hidden_type == 'emb':
-            enc_output = enc_input
-        elif self.hidden_type == 'rnn':
-            enc_output = enc_hidden
-        else:
-            enc_output = torch.cat((enc_hidden, enc_input), -1)
-        # print('enc_output: {}'.format(enc_output.size()))
-
-        enc_output_flat = enc_output.contiguous().view(batch_size * max_enc_len, -1)
-        # print('enc_output_flat: {}'.format(enc_output_flat.size()))
-        enc_output_proj = self.We(enc_output_flat).view(batch_size, max_enc_len, -1)
-
-        enc_field_flat = enc_field.view(batch_size * max_enc_len, -1)
-        # print('enc_output_flat: {}'.format(enc_output_flat.size()))
-        enc_field_proj = self.Wf(enc_field_flat).view(batch_size, max_enc_len, -1)
-
-        enc_proj = enc_output_proj + enc_field_proj
+        enc_hidden_proj, enc_input_proj, enc_field_proj = \
+            self._get_enc_proj(enc_hidden, enc_input, enc_field, batch_size, max_enc_len)
 
         # get link attention scores
         if self.field_self_att:
-            f_matrix, enc_output_trans, enc_field_trans = self.position_self_attention(enc_pos, enc_output, enc_field)
+            f_matrix, enc_hidden_trans, enc_input_trans, enc_field_trans\
+                = self._pos_self_attn(enc_pos, enc_hidden, enc_input, enc_field)
         else:
             f_matrix = None
-            enc_output_trans = enc_output
+            enc_hidden_trans = enc_hidden
+            enc_input_trans = enc_input
             enc_field_trans = enc_field
 
         if teacher_forcing_ratio:
@@ -218,9 +291,11 @@ class DecoderRNN(BaseRNN):
                 dec_hidden = hidden[:, step, :]
                 embed_input = embed_inputs[:, step, :]
 
-                combined_vocab, attn_scores = self.decode_step(input_ids, coverage, dec_hidden, enc_proj, batch_size,
-                                                               max_enc_len, enc_mask, enc_output_trans, enc_field_trans,
-                                                               embed_input, max_source_oov)
+                combined_vocab, attn_scores = self._decode_step(batch_size, input_ids, coverage, max_source_oov,
+                                                                dec_hidden,
+                                                                enc_mask, embed_input, max_enc_len,
+                                                                enc_hidden_proj, enc_input_proj, enc_field_proj,
+                                                                enc_hidden_trans, enc_input_trans, enc_field_trans)
                 # mask the output to account for PAD
                 target_mask_0 = target_id.ne(0).detach()
                 output = combined_vocab.gather(1, target_id).add_(sys.float_info.epsilon)
@@ -245,11 +320,18 @@ class DecoderRNN(BaseRNN):
 
             return total_masked_loss
         else:
-            return self.evaluate(targets, batch_size, max_length, max_source_oov, enc_output_trans, enc_field_trans,
-                                 f_matrix, decoder_hidden, enc_mask, input_ids, coverage, enc_proj, max_enc_len, w2fs, fig)
+            return self.evaluate(targets, batch_size, max_length, max_source_oov,
+                                 enc_hidden_trans, enc_input_trans, enc_field_trans,
+                                 f_matrix, decoder_hidden, enc_mask, input_ids, coverage,
+                                 enc_hidden_proj, enc_input_proj, enc_field_proj,
+                                 max_enc_len, w2fs, fig)
 
-    def evaluate(self, targets, batch_size, max_length, max_source_oov, enc_output_trans, enc_field_trans, f_matrix,
-                 decoder_hidden, enc_mask, input_ids, coverage, enc_proj, max_enc_len, w2fs, fig):
+    def evaluate(self, targets, batch_size, max_length, max_source_oov,
+                 enc_hidden_trans, enc_input_trans, enc_field_trans,
+                 f_matrix, decoder_hidden, enc_mask, input_ids, coverage,
+                 enc_hidden_proj, enc_input_proj, enc_field_proj,
+                 max_enc_len, w2fs, fig):
+
         lengths = np.array([max_length] * batch_size)
         decoded_outputs = []
         if fig:
@@ -258,10 +340,11 @@ class DecoderRNN(BaseRNN):
         # step through decoder hidden states
         for step in range(max_length):
             dec_hidden, _c = self.rnn(embed_input, decoder_hidden)
-            combined_vocab, attn_scores = self.decode_step(input_ids, coverage,
-                                                           dec_hidden.squeeze(1), enc_proj, batch_size, max_enc_len,
-                                                           enc_mask, enc_output_trans, enc_field_trans,
-                                                           embed_input.squeeze(1), max_source_oov)
+            combined_vocab, attn_scores = self._decode_step(batch_size, input_ids, coverage, max_source_oov,
+                                                            dec_hidden.squeeze(1),
+                                                            enc_mask, embed_input.squeeze(1), max_enc_len,
+                                                            enc_hidden_proj, enc_input_proj, enc_field_proj,
+                                                            enc_hidden_trans, enc_input_trans, enc_field_trans)
 
             combined_vocab[:, self.unk_id] = 0  # NOTE: not allow decoder to output UNK
             symbols = combined_vocab.topk(1)[1]  # (values, indices)
@@ -312,9 +395,9 @@ class DecoderRNN(BaseRNN):
         """ If the encoder is bidirectional, do the following transformation.
             (#directions * #layers, #batch, hidden_size) -> (#layers, #batch, #directions * hidden_size)
         """
-        if self.bidirectional_encoder:
+        if self.directions == 2:
             h = torch.cat([h[0:h.size(0):2], h[1:h.size(0):2]], 2)
-            h = self.W_dir(h)
+            h = self.W_enc_state(h)
         return h
 
     def _validate_args(self, targets, enc_state, encoder_outputs, teacher_forcing_ratio):

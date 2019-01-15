@@ -37,10 +37,10 @@ parser.add_argument('--attn_type', type=str, default='concat', choices=['concat'
                     help='type of attention score calculation: concat, dot')
 parser.add_argument('--attn_fuse', type=str, default='concat', choices=['concat', 'prod'],
                     help='type of attention score aggregation: sum, prod')
-parser.add_argument('--attn_level', type=int, default=1, choices=[1,2,3],
-                    help='levels of attention: 1, 2, 3')
-parser.add_argument('--hidden_type', type=str, default='emb', choices=['emb', 'rnn', 'both'],
-                    help='encodings for attention layer: RNN hidden state(rnn) or word embeddings(emb) or (both)')
+parser.add_argument('--attn_level', type=int, default=2, choices=[1, 2, 3],
+                    help='levels of attention: 1(hidden only), 2(hidden+field), 3(hidden+word+field) hidden=rnn/emb')
+parser.add_argument('--attn_src', type=str, default='emb', choices=['emb', 'rnn'],
+                    help='encodings for attention layer: RNN hidden state(rnn) or word embeddings(emb)')
 parser.add_argument('--field_self_att', action='store_true',
                     help='whether use field self-attention')
 parser.add_argument('--use_cov_attn', action='store_true',
@@ -50,6 +50,12 @@ parser.add_argument('--use_cov_loss', action='store_true',
 parser.add_argument('--field_concat_pos', action='store_true',
                     help='whether concat pos embeddings to field embeddings for attention calculation')
 args = parser.parse_args()
+
+# ------------------------------------- checking attn_src -------------------------------------- #
+if args.attn_level == 3 and args.attn_src == 'emb':
+    print(" *** WARNING *** args.attn_level == 3 and args.attn_src == 'emb', forcing attn_src to 'rnn'")
+    args.attn_src = 'rnn'
+
 # ------------------------------------- random seed and cuda -------------------------------------- #
 # Set the random seed manually for reproducibility.
 torch.manual_seed(args.seed)
@@ -198,14 +204,15 @@ if __name__ == "__main__":
     print("Building Model ...")
     embedding = nn.Embedding(t_dataset.vocab.size, config.emsize, padding_idx=0)
     encoder = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, hidden_size=config.emsize,
-                         pos_size=t_dataset.max_p, pemsize=config.pemsize, hidden_type=args.hidden_type,
+                         pos_size=t_dataset.max_p, pemsize=config.pemsize, attn_src=args.attn_src,
                          input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers,
-                         rnn_cell=config.cell, bidirectional=config.bidirectional,
+                         rnn_cell=config.cell, directions=config.directions,
                          variable_lengths=True, field_concat_pos=args.field_concat_pos)
     decoder = DecoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, embed_size=config.emsize,
                          pemsize=config.pemsize, sos_id=3, eos_id=2, unk_id=1,
-                         rnn_cell=config.cell, hidden_type=args.hidden_type, attn_type=args.attn_type,
-                         attn_fuse=args.attn_fuse, bidirectional=config.bidirectional,
+                         rnn_cell=config.cell, directions=config.directions,
+                         attn_src=args.attn_src, attn_level=args.attn_level,
+                         attn_type=args.attn_type, attn_fuse=args.attn_fuse,
                          use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss,
                          field_self_att=args.field_self_att, field_concat_pos=args.field_concat_pos, mask=args.mask,
                          use_cuda=args.cuda,

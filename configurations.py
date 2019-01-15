@@ -7,7 +7,7 @@ class Config(object):
     epochs = 50
     batch_size = 128
     dropout = 0
-    bidirectional = True
+    directions = 2
     max_grad_norm = 10
     max_len = 100
 
@@ -21,7 +21,7 @@ class ConfigTest(object):
     epochs = 2
     batch_size = 10
     dropout = 0
-    bidirectional = True
+    directions = 2
     max_grad_norm = 1
     testmode = True
     max_len = 50

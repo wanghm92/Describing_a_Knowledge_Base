@@ -5,18 +5,17 @@ from .baseRNN import BaseRNN
 
 
 class EncoderRNN(BaseRNN):
-    def __init__(self, vocab_size, embedding, hidden_size, pos_size, pemsize, hidden_type='emb', input_dropout_p=0,
-                 dropout_p=0, n_layers=1, rnn_cell='gru',
-                 bidirectional=True, variable_lengths=True, field_concat_pos=False):
+    def __init__(self, vocab_size, embedding, hidden_size, pos_size, pemsize, attn_src='emb', input_dropout_p=0,
+                 dropout_p=0, n_layers=1, rnn_cell='gru', directions=2, variable_lengths=True, field_concat_pos=False):
         super(EncoderRNN, self).__init__(vocab_size, hidden_size, input_dropout_p, dropout_p, n_layers, rnn_cell)
 
-        self.hidden_type = hidden_type
+        self.attn_src = attn_src
         self.variable_lengths = variable_lengths
         self.field_concat_pos = field_concat_pos
         self.pos_embedding = nn.Embedding(pos_size, pemsize, padding_idx=0)
         self.embedding = embedding
         self.rnn = self.rnn_cell((hidden_size + pemsize) * 2, hidden_size, n_layers, batch_first=True,
-                                 bidirectional=bidirectional, dropout=dropout_p)
+                                 bidirectional=(directions == 2), dropout=dropout_p)
 
     def forward(self, batch_s, batch_f, batch_pf, batch_pb, input_lengths=None):
 
@@ -36,16 +35,12 @@ class EncoderRNN(BaseRNN):
 
         enc_hidden, enc_state = self.rnn(embedded)
 
-        if not self.hidden_type == 'emb':
-            enc_outputs, _ = nn.utils.rnn.pad_packed_sequence(enc_hidden, batch_first=True)
-        else:
+        if self.attn_src == 'emb':
             enc_outputs = None
+        else:
+            enc_outputs, _ = nn.utils.rnn.pad_packed_sequence(enc_hidden, batch_first=True)
 
         if self.field_concat_pos:
             return enc_outputs, embed_input, embed_field_pos, embed_pos, enc_state, mask
         else:
             return enc_outputs, embed_input, embed_field, embed_pos, enc_state, mask
-
-
-
-
