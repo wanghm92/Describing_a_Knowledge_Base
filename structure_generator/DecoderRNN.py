@@ -22,7 +22,7 @@ class DecoderRNN(BaseRNN):
 
         self.attn_src = attn_src
         self.attn_type = attn_type
-        self.attn_fuse = attn_fuse # TODO: unused
+        self.attn_fuse = attn_fuse
         self.attn_level = attn_level
         self.directions = directions
         self.use_cov_loss = use_cov_loss
@@ -132,7 +132,6 @@ class DecoderRNN(BaseRNN):
 
     def _get_enc_keys(self, enc_hidden, enc_input, enc_field, batch_size, max_enc_len):
 
-        # TODO: simplify this chunk
         if self.attn_level == 3:
             enc_hidden_flat = enc_hidden.contiguous().view(batch_size * max_enc_len, -1)
             # print('enc_hidden_flat: {}'.format(enc_hidden_flat.size()))
@@ -175,16 +174,29 @@ class DecoderRNN(BaseRNN):
 
         return enc_hidden_keys, enc_input_keys, enc_field_keys
 
-    def _attn_score(self, batch_size, max_enc_len, coverage, enc_mask,
-                    dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys):
-        
+    def _score_concat(self, vt, dec_query, enc_keys, cov_vector, batch_size, max_enc_len, enc_mask):
+
+        attn_src = dec_query + enc_keys
+        if self.use_cov_attn:
+            attn_src += cov_vector
+        score = vt(torch.tanh(attn_src).view(batch_size*max_enc_len, -1)).view(batch_size, max_enc_len)
+
+        # print('score [before]: {}'.format(score))
+        # print('enc_mask: {}'.format(enc_mask))
+        score.data.masked_fill_(enc_mask.data.byte(), 0)  # mask to -inf before applying softmax
+        score = F.softmax(score, dim=1)
+        # print('score: {}'.format(score.size()))
+
+        return score
+
+    def _get_attn_score_concat(self, batch_size, max_enc_len, coverage, enc_mask,
+                               dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys):
         dec_query = self.Wd(dec_hidden)
         # print('dec_query [before]: {}'.format(dec_query.size()))
         if self.attn_src == 'emb':
             dec_query = dec_query.unsqueeze(1).expand_as(enc_input_keys)
         elif self.attn_src == 'rnn':
             dec_query = dec_query.unsqueeze(1).expand_as(enc_hidden_keys)
-
         # print('dec_query [after]: {}'.format(dec_query.size()))
 
         if self.attn_level == 3:
@@ -198,28 +210,25 @@ class DecoderRNN(BaseRNN):
             enc_keys = enc_hidden_keys
         # print('enc_keys: {}'.format(enc_keys.size()))
 
-        attention_source = dec_query + enc_keys
-
         if self.use_cov_attn:
             cov_vector = self.Wc(coverage.view(-1, 1)).view(batch_size, max_enc_len, -1)
-            # print('cov_vector: {}'.format(cov_vector.size()))
-            attention_source += cov_vector
+        else:
+            cov_vector = None
+        # print('cov_vector: {}'.format(cov_vector.size()))
 
-        # print('attention_source: {}'.format(attention_source.size()))
-        e_t = self.v(torch.tanh(attention_source).view(batch_size*max_enc_len, -1))
-        # print('e_t: {}'.format(e_t.size()))
-
-        attn_scores = e_t.view(batch_size, max_enc_len)
-        del e_t
-
-        # mask to -inf before applying softmax
-        # print('attn_scores [before]: {}'.format(attn_scores))
-        # print('enc_mask: {}'.format(enc_mask))
-        attn_scores.data.masked_fill_(enc_mask.data.byte(), 0)
-        attn_scores = F.softmax(attn_scores, dim=1)
+        attn_scores = self._score_concat(self.v, dec_query, enc_keys, cov_vector, batch_size, max_enc_len, enc_mask)
         # print('attn_scores: {}'.format(attn_scores.size()))
 
-        return attn_scores
+        return attn_scores, None, None
+
+    def _get_attn_scores(self, batch_size, max_enc_len, coverage, enc_mask,
+                         dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys):
+        if self.attn_fuse == 'concat':
+            return self._get_attn_score_concat(batch_size, max_enc_len, coverage, enc_mask,
+                                               dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys)
+        else:
+            return self._get_attn_score_prod(batch_size, max_enc_len, coverage, enc_mask,
+                                             dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys)
 
     def _get_contexts(self, attn_scores, enc_hidden_vals, enc_input_vals, enc_field_vals):
         if self.attn_level == 3:
@@ -264,8 +273,8 @@ class DecoderRNN(BaseRNN):
                      ):
         # print('input_ids: {}'.format(input_ids.size()))
 
-        attn_scores = self._attn_score(batch_size, max_enc_len, coverage, enc_mask,
-                                       dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys)
+        attn_scores, _, _ = self._get_attn_scores(batch_size, max_enc_len, coverage, enc_mask,
+                                                  dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys)
 
         enc_output_context, enc_context_proj = self._get_contexts(attn_scores, enc_hidden_vals, enc_input_vals, enc_field_vals)
 
