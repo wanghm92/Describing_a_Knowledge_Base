@@ -13,8 +13,10 @@ class DecoderRNN(BaseRNN):
     def __init__(self, vocab_size, embedding, embed_size, pemsize, sos_id, eos_id, unk_id, 
                  rnn_cell='gru', directions=2,
                  attn_src='emb', attn_type='concat', attn_fuse='sum', attn_level=2,
-                 use_cov_loss=True, use_cov_attn=True, field_self_att=False, field_concat_pos=False, mask=False,
-                 use_cuda=True, n_layers=1, input_dropout_p=0, dropout_p=0, max_len=100, lmbda=1.5):
+                 use_cov_loss=True, use_cov_attn=True,
+                 field_self_att=False, field_concat_pos=False, field_context=False,
+                 mask=False, use_cuda=True,
+                 n_layers=1, input_dropout_p=0, dropout_p=0, max_len=100, lmbda=1.5):
         
         hidden_size = embed_size
 
@@ -29,6 +31,7 @@ class DecoderRNN(BaseRNN):
         self.use_cov_attn = use_cov_attn
         self.field_self_att = field_self_att
         self.field_concat_pos = field_concat_pos
+        self.field_context = field_context
         # TODO: input feeding
         self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
         self.output_size = vocab_size
@@ -109,9 +112,12 @@ class DecoderRNN(BaseRNN):
         # ----------------- params for output ----------------- #
         output_layer_input_size = hidden_size  # decoder state size
         if self.attn_level == 3:
-            output_layer_input_size += (hidden_size + enc_input_size + field_input_size)
+            output_layer_input_size += (hidden_size + enc_input_size)
+            if self.field_context:
+                output_layer_input_size += field_input_size
         elif self.attn_level == 2:
-            output_layer_input_size += field_input_size
+            if self.field_context:
+                output_layer_input_size += field_input_size
             if self.attn_src == 'emb':
                 output_layer_input_size += hidden_size
             if self.attn_src == 'rnn':
@@ -253,8 +259,6 @@ class DecoderRNN(BaseRNN):
     def _get_attn_score_fuse_prod(self, batch_size, max_enc_len, cov_vector, enc_mask,
                                   dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys):
 
-        # TODO: use different dec_query
-
         attn_score_top = None
         attn_score_mid = None
         attn_score_btm = None
@@ -307,18 +311,6 @@ class DecoderRNN(BaseRNN):
                                                         dec_query_hidden, enc_hidden_keys, cov_vector, enc_mask)
             attn_score_top = attn_score_hidden
 
-        # print('dec_query_hidden: {}'.format(dec_query_hidden.size()))
-        # print('dec_query_input: {}'.format(dec_query_input.size()))
-        # print('dec_query_field: {}'.format(dec_query_field.size()))
-        #
-        # print('attn_score_hidden: {}'.format(attn_score_hidden))
-        # print('attn_score_input: {}'.format(attn_score_input))
-        # print('attn_score_field: {}'.format(attn_score_field))
-        #
-        # print('attn_score_top: {}'.format(attn_score_top))
-        # print('attn_score_mid: {}'.format(attn_score_mid))
-        # print('attn_score_btm: {}'.format(attn_score_btm))
-
         return attn_score_top, attn_score_mid, attn_score_btm
 
 
@@ -342,27 +334,33 @@ class DecoderRNN(BaseRNN):
         if self.attn_level == 3:
             enc_hidden_context = attn_scores[0].unsqueeze(1).bmm(enc_hidden_vals).squeeze(1)
             enc_input_context = attn_scores[1].unsqueeze(1).bmm(enc_input_vals).squeeze(1)
-            enc_field_context = attn_scores[2].unsqueeze(1).bmm(enc_field_vals).squeeze(1)
             # output
-            enc_output_context = torch.cat((enc_hidden_context, enc_input_context, enc_field_context), 1)
+            enc_output_context = torch.cat((enc_hidden_context, enc_input_context), 1)
+
+            if self.field_context:
+                enc_field_context = attn_scores[2].unsqueeze(1).bmm(enc_field_vals).squeeze(1)
+                enc_output_context = torch.cat((enc_output_context, enc_field_context), 1)
+
             # p_gen
             enc_context_proj = self.w_r(enc_hidden_context) + self.w_e(enc_input_context) + self.w_f(enc_field_context)
 
         elif self.attn_level == 2:
-            enc_field_context = attn_scores[2].unsqueeze(1).bmm(enc_field_vals).squeeze(1)
             if self.attn_src == 'emb':
-                enc_input_context = attn_scores[0].unsqueeze(1).bmm(enc_input_vals).squeeze(1)
                 # output
-                enc_output_context = torch.cat((enc_input_context, enc_field_context), 1)
+                enc_output_context = attn_scores[0].unsqueeze(1).bmm(enc_input_vals).squeeze(1)
                 # p_gen
-                enc_context_proj = self.w_e(enc_input_context) + self.w_f(enc_field_context)
+                enc_context_proj = self.w_e(enc_output_context)
 
             elif self.attn_src == 'rnn':
-                enc_hidden_context = attn_scores[0].unsqueeze(1).bmm(enc_hidden_vals).squeeze(1)
                 # output
-                enc_output_context = torch.cat((enc_hidden_context, enc_field_context), 1)
+                enc_output_context = attn_scores[0].unsqueeze(1).bmm(enc_hidden_vals).squeeze(1)
                 # p_gen
-                enc_context_proj = self.w_r(enc_hidden_context) + self.w_f(enc_field_context)
+                enc_context_proj = self.w_r(enc_output_context)
+
+            if self.field_context:
+                enc_field_context = attn_scores[2].unsqueeze(1).bmm(enc_field_vals).squeeze(1)
+                enc_output_context = torch.cat((enc_output_context, enc_field_context), 1)
+                enc_context_proj += self.w_f(enc_field_context)
 
         else:
             # output

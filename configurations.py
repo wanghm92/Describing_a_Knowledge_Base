@@ -4,7 +4,7 @@ class Config(object):
     pemsize = 5
     nlayers = 1
     lr = 0.001
-    epochs = 50
+    epochs = 60
     batch_size = 64
     dropout = 0
     directions = 2

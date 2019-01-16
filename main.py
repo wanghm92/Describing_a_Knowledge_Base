@@ -11,8 +11,14 @@ from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq
 from configurations import Config, ConfigTest
 from eval import Evaluate
-import random, os, pprint
+import random, os, pprint, logging
 from tensorboardX import SummaryWriter
+
+program = os.path.basename(sys.argv[0])
+L = logging.getLogger(program)
+logging.basicConfig(format='%(asctime)s: %(levelname)s: %(message)s')
+logging.root.setLevel(level=logging.INFO)
+L.info("Running %s" % ' '.join(sys.argv))
 
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------------- Args ------------------------------------------------- #
@@ -49,11 +55,13 @@ parser.add_argument('--use_cov_loss', action='store_true',
                     help='whether use coverage loss')
 parser.add_argument('--field_concat_pos', action='store_true',
                     help='whether concat pos embeddings to field embeddings for attention calculation')
+parser.add_argument('--field_context', action='store_false',
+                    help='whether pass context vector of field embeddings to output layer')
 args = parser.parse_args()
 
 # ------------------------------------- checking attn_src -------------------------------------- #
 if args.attn_level != 2 and args.attn_src == 'emb':
-    print(" *** WARNING *** args.attn_level != 2 and args.attn_src == 'emb', forcing attn_src to 'rnn'")
+    L.info(" *** WARNING *** args.attn_level != 2 and args.attn_src == 'emb', forcing attn_src to 'rnn'")
     args.attn_src = 'rnn'
 
 # ------------------------------------- random seed and cuda -------------------------------------- #
@@ -61,7 +69,7 @@ if args.attn_level != 2 and args.attn_src == 'emb':
 torch.manual_seed(args.seed)
 if torch.cuda.is_available():
     if not args.cuda:
-        print(" *** WARNING *** CUDA device available, forcing to use")
+        L.info(" *** WARNING *** CUDA device available, forcing to use")
         args.cuda = torch.cuda.is_available()
     else:
         torch.cuda.manual_seed(args.seed)
@@ -69,9 +77,9 @@ device = torch.device("cuda" if args.cuda else "cpu")
 
 # --------------------------------------- save_file_dir ------------------------------------------- #
 save_file_dir = os.path.dirname(args.save)
-print("Models are going to be saved/loaded to/from: {}".format(save_file_dir))
+L.info("Models are going to be saved/loaded to/from: {}".format(save_file_dir))
 if not os.path.exists(save_file_dir):
-    print("save directory does not exist, mkdir ...")
+    L.info("save directory does not exist, mkdir ...")
     os.mkdir(save_file_dir)
     if not os.path.exists(os.path.join(save_file_dir, "evaluations")):
         os.mkdir(os.path.join(save_file_dir, "evaluations"))
@@ -128,10 +136,10 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
     best_dev_rouge = 0.0
     train_loader = t_dataset.corpus
     len_batch = len(train_loader)
-    print("{} batches to be trained".format(len_batch))
+    L.info("{} batches to be trained".format(len_batch))
     epoch_examples_total = t_dataset.len
     save_prefix = '.'.join(args.save.split('.')[:-1]) if args.mode == 4 else args.save
-    print("Model saving prefix is: {}".format(save_prefix))
+    L.info("Model saving prefix is: {}".format(save_prefix))
 
     for epoch in range(load_epoch + 1, n_epochs + load_epoch + 1):
         # --------------------------------------- train -------------------------------------------- #
@@ -149,15 +157,15 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
             sys.stdout.flush()
 
         epoch_loss /= epoch_examples_total
-        print("Finished epoch %d with average loss: %.4f" % (epoch, epoch_loss))
+        L.info("Finished epoch %d with average loss: %.4f" % (epoch, epoch_loss))
         writer.add_scalar('loss/epoch_loss', epoch_loss, epoch)
 
         # --------------------------------------- inference -------------------------------------------- #
         predictor = Predictor(model, v_dataset.vocab, args.cuda)
-        print("Start Evaluating ...")
+        L.info("Start Evaluating ...")
         cand, ref, eval_loss = predictor.preeval_batch(v_dataset)
         writer.add_scalar('valid/loss', eval_loss, epoch)
-        print('Result:')
+        L.info('Result:')
         print('ref: ', ref[1][0])
         print('cand: {}'.format(cand[1]))
         eval_file_out = "{}/evaluations/valid.epoch_{}.cand.live.txt".format(save_file_dir, epoch)
@@ -186,9 +194,9 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         else:
             suffix = ""
         if len(suffix) > 0:
-            print("model at epoch #{} saved".format(epoch))
+            L.info("model at epoch #{} saved".format(epoch))
         else:
-            print("[*** {} ***] model at epoch #{} saved".format(suffix, epoch))
+            L.info("[*** {} ***] model at epoch #{} saved".format(suffix, epoch))
         torch.save(model.state_dict(), "{}{}.{}".format(save_prefix, suffix, epoch))
 
         # epoch_score = 2*rouge_l*bleu_4/(rouge_l + bleu_4)
@@ -196,20 +204,19 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------------- Main ------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------- #
-
 if __name__ == "__main__":
 
     # -------------------------------------------------------------------------------------------------- #
     # ------------------------------------- Reading Datasets ------------------------------------------- #
     # -------------------------------------------------------------------------------------------------- #
-    print("Reading training data ...")
+    L.info("Reading training data ...")
     t_dataset = Table2text_seq('train', type=args.type, USE_CUDA=args.cuda,
                                batch_size=config.batch_size, train_mode=args.mode)
 
     # -------------------------------------------------------------------------------------------------- #
     # -------------------------------------- Building Model -------------------------------------------- #
     # -------------------------------------------------------------------------------------------------- #
-    print("Building Model ...")
+    L.info("Building Model ...")
     embedding = nn.Embedding(t_dataset.vocab.size, config.emsize, padding_idx=0)
     encoder = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, hidden_size=config.emsize,
                          pos_size=t_dataset.max_p, pemsize=config.pemsize, attn_src=args.attn_src,
@@ -222,70 +229,70 @@ if __name__ == "__main__":
                          attn_src=args.attn_src, attn_level=args.attn_level,
                          attn_type=args.attn_type, attn_fuse=args.attn_fuse,
                          use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss,
-                         field_self_att=args.field_self_att, field_concat_pos=args.field_concat_pos, mask=args.mask,
-                         use_cuda=args.cuda,
+                         field_self_att=args.field_self_att, field_concat_pos=args.field_concat_pos,
+                         field_context=args.field_context, mask=args.mask, use_cuda=args.cuda,
                          input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers)
     model = Seq2seq(encoder, decoder).to(device)
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
 
-    print("Model parameters: ")
+    L.info("Model parameters: ")
     params_dict = {name: param.size() for name, param in model.named_parameters() if param.requires_grad}
     pprint.pprint(params_dict, indent=2)
 
     # --------------------------------------- train -------------------------------------------- #
     if args.mode == 0:
         try:
-            print("number of training examples: %d" % t_dataset.len)
-            print("Reading valid data ...")
+            L.info("number of training examples: %d" % t_dataset.len)
+            L.info("Reading valid data ...")
             v_dataset = Table2text_seq('valid', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
 
-            print("start training...")
+            L.info("start training...")
             train_epoches(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1)
         except KeyboardInterrupt:
-            print('-' * 89)
-            print('Exiting from training early')
+            L.info('-' * 89)
+            L.info('Exiting from training early')
 
     # ----------------------------------- resume train ----------------------------------------- #
     elif args.mode == 1:
         model.load_state_dict(torch.load(args.save))
         load_epoch = int(args.save.split('.')[-1])
-        print("model restored from epoch-{}: {}".format(load_epoch, args.save))
+        L.info("model restored from epoch-{}: {}".format(load_epoch, args.save))
 
         try:
-            print("number of training examples: %d" % t_dataset.len)
-            print("Reading valid data ...")
+            L.info("number of training examples: %d" % t_dataset.len)
+            L.info("Reading valid data ...")
             v_dataset = Table2text_seq('valid', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
 
-            print("start training...")
+            L.info("start training...")
             train_epoches(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1, load_epoch=load_epoch)
         except KeyboardInterrupt:
-            print('-' * 89)
-            print('Exiting from training early')
+            L.info('-' * 89)
+            L.info('Exiting from training early')
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
-        print("Read $-{}-$ data")
+        L.info("Read $-{}-$ data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
-        print("number of test examples: %d" % dataset.len)
+        L.info("number of test examples: %d" % dataset.len)
 
-        print("Start Evaluating ...")
+        L.info("Start Evaluating ...")
         cand, ref, _ = predictor.preeval_batch
 
     # ----------------------------------- evaluation ---------------------------------------- #
     elif args.mode == 2:
         model.load_state_dict(torch.load(args.save))
         load_epoch = int(args.save.split('.')[-1])
-        print("model restored from epoch-{}: {}".format(load_epoch, args.save))
+        L.info("model restored from epoch-{}: {}".format(load_epoch, args.save))
 
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
-        print("Read $-{}-$ data")
+        L.info("Read $-{}-$ data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
-        print("number of test examples: %d" % dataset.len)
+        L.info("number of test examples: %d" % dataset.len)
 
-        print("Start Evaluating ...")
+        L.info("Start Evaluating ...")
         cand, ref, _ = predictor.preeval_batch(dataset)
 
-        print('Result:')
-        print('ref: ', ref[1][0])
-        print('cand: {}'.format(cand[1]))
+        L.info('Result:')
+        L.info('ref: ', ref[1][0])
+        L.info('cand: {}'.format(cand[1]))
         cand_file_out = "{}/evaluations/{}.epoch_{}.cand.txt".format(save_file_dir, args.dataset, load_epoch)
         with open(cand_file_out, 'w+') as fout:
             for c in range(len(cand)):
@@ -301,10 +308,10 @@ if __name__ == "__main__":
     elif args.mode == 3:
         model.load_state_dict(torch.load(args.save))
         load_epoch = int(args.save.split('.')[-1])
-        print("model restored from epoch-{}: {}".format(load_epoch, args.save))
+        L.info("model restored from epoch-{}: {}".format(load_epoch, args.save))
 
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=1)
-        print("Read $-{}-$ data")
+        L.info("Read $-{}-$ data")
         predictor = Predictor(model, dataset.vocab, args.cuda)
 
         while True:
@@ -317,12 +324,12 @@ if __name__ == "__main__":
                 table.append(fields[0][i])
                 table.append(":")
                 table.append(sources[0][i])
-            print("Table:")
-            print(' '.join(table)+'\n')
-            print("Refer: ")
-            print(' '.join(targets[0])+'\n')
+            L.info("Table:")
+            L.info(' '.join(table)+'\n')
+            L.info("Refer: ")
+            L.info(' '.join(targets[0])+'\n')
             outputs = predictor.predict(batch_s, batch_o_s, batch_f, batch_pf, batch_pb, max_source_oov
                                         , source_len, list_oovs[0], w2fs)
-            print("Result: ")
-            print(outputs)
-            print('-'*120)
+            L.info("Result: ")
+            L.info(outputs)
+            L.info('-'*120)
