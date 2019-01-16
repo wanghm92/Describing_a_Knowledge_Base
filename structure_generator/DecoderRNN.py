@@ -110,7 +110,7 @@ class DecoderRNN(BaseRNN):
             self.Wc = nn.Linear(1, hidden_size)  # e_t: coverage vector
 
         # ----------------- params for output ----------------- #
-        output_layer_input_size = hidden_size  # decoder state size
+        output_layer_input_size = 0  # decoder state size
         if self.attn_level == 3:
             output_layer_input_size += (hidden_size + enc_input_size)
             if self.field_context:
@@ -410,7 +410,10 @@ class DecoderRNN(BaseRNN):
 
         # print('enc_output_context: {}'.format(enc_output_context.size()))
         # print('enc_context_proj: {}'.format(enc_context_proj.size()))
-        p_vocab = F.softmax(self.V2(torch.cat((dec_hidden, self.V1(enc_output_context), 1))), dim=1)
+        enc_output_context_rd = self.V1(enc_output_context)
+        out_vec = torch.cat((dec_hidden, enc_output_context_rd), 1)
+        out_vec = self.V2(out_vec)
+        p_vocab = F.softmax(out_vec, dim=1)
         # p_vocab = F.softmax(self.V(torch.cat((dec_hidden, enc_output_context), 1)), dim=1)
         # print('p_vocab: {}'.format(p_vocab.size()))
 
