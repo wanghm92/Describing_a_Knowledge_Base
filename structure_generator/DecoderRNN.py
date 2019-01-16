@@ -126,7 +126,9 @@ class DecoderRNN(BaseRNN):
             output_layer_input_size += enc_input_size
 
         # print('output_layer_input_size: {}'.format(output_layer_input_size))
-        self.V = nn.Linear(output_layer_input_size, self.output_size)
+        self.V1 = nn.Linear(output_layer_input_size, hidden_size)
+        self.V2 = nn.Linear(hidden_size*2, self.output_size)
+        # self.V = nn.Linear(output_layer_input_size, self.output_size)
 
         # ----------------- parameters for p_gen ----------------- #
         self.w_r = nn.Linear(enc_input_size, 1)     # encoder hidden context
@@ -408,7 +410,8 @@ class DecoderRNN(BaseRNN):
 
         # print('enc_output_context: {}'.format(enc_output_context.size()))
         # print('enc_context_proj: {}'.format(enc_context_proj.size()))
-        p_vocab = F.softmax(self.V(torch.cat((dec_hidden, enc_output_context), 1)), dim=1)
+        p_vocab = F.softmax(self.V2(torch.cat((dec_hidden, self.V1(enc_output_context), 1))), dim=1)
+        # p_vocab = F.softmax(self.V(torch.cat((dec_hidden, enc_output_context), 1)), dim=1)
         # print('p_vocab: {}'.format(p_vocab.size()))
 
         p_gen = torch.sigmoid(enc_context_proj + self.w_d(dec_hidden) + self.w_y(decoder_input)).view(-1, 1)
