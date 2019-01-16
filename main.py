@@ -34,7 +34,7 @@ parser.add_argument('--type', type=int, default=0, choices=[0, 1],
 parser.add_argument('--mask', action='store_true',
                     help='false(0)/true(1)')
 parser.add_argument('--attn_type', type=str, default='concat', choices=['concat', 'dot'],
-                    help='type of attention score calculation: concat, dot')
+                    help='type of attention score calculation: concat, dot (NOT SUPPORTED)')
 parser.add_argument('--attn_fuse', type=str, default='concat', choices=['concat', 'prod'],
                     help='type of attention score aggregation: concat, prod')
 parser.add_argument('--attn_level', type=int, default=2, choices=[1, 2, 3],
@@ -77,6 +77,7 @@ if not os.path.exists(save_file_dir):
         os.mkdir(os.path.join(save_file_dir, "evaluations"))
 
 # -------------------------------- Hyperparams and Tensorboard ------------------------------------ #
+# config = ConfigTest()
 config = Config()
 if args.type == 0:
     config.batch_size = 128
@@ -226,6 +227,10 @@ if __name__ == "__main__":
                          input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers)
     model = Seq2seq(encoder, decoder).to(device)
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
+
+    print("Model parameters: ")
+    params_dict = {name: param.size() for name, param in model.named_parameters() if param.requires_grad}
+    pprint.pprint(params_dict, indent=2)
 
     # --------------------------------------- train -------------------------------------------- #
     if args.mode == 0:

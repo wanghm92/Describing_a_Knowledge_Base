@@ -60,8 +60,35 @@ class DecoderRNN(BaseRNN):
             field_input_size += self_size
         # print('field_input_size: {}'.format(field_input_size))
 
-        self.v = nn.Linear(hidden_size, 1)
-        self.Wd = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
+        if self.attn_fuse == 'concat':
+            self.v = nn.Linear(hidden_size, 1)
+            self.Wd = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
+        else:
+            if self.attn_level == 3:
+                self.v_hidden = nn.Linear(hidden_size, 1)
+                self.v_input = nn.Linear(hidden_size, 1)
+                self.v_field = nn.Linear(hidden_size, 1)
+                self.Wd_hidden = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
+                self.Wd_input = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
+                self.Wd_field = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
+
+            elif self.attn_level == 2:
+                self.v_field = nn.Linear(hidden_size, 1)
+                self.Wd_field = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
+
+                if self.attn_src == 'emb':
+                    self.v_input = nn.Linear(hidden_size, 1)
+                    self.Wd_input = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
+
+                elif self.attn_src == 'rnn':
+                    self.v_hidden = nn.Linear(hidden_size, 1)
+                    self.Wd_hidden = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
+
+            else:
+                self.v_hidden = nn.Linear(hidden_size, 1)
+                self.Wd_hidden = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
+
+
         self.Wf = nn.Linear(field_input_size, hidden_size)
 
         if self.attn_level == 3:
@@ -174,23 +201,31 @@ class DecoderRNN(BaseRNN):
 
         return enc_hidden_keys, enc_input_keys, enc_field_keys
 
-    def _score_concat(self, vt, dec_query, enc_keys, cov_vector, batch_size, max_enc_len, enc_mask):
+    def _softmax(self, t, mask):
+        """ apply mask to logits and compute softmax"""
+        t.masked_fill_(mask.data.byte(), -np.inf)  # mask to -inf before applying softmax
+        score = F.softmax(t, dim=1)
+        return score
+
+    def _attn_score_concat(self, batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask):
 
         attn_src = dec_query + enc_keys
-        if self.use_cov_attn:
-            attn_src += cov_vector
-        score = vt(torch.tanh(attn_src).view(batch_size*max_enc_len, -1)).view(batch_size, max_enc_len)
+        # print('attn_src: {}'.format(attn_src.size()))
 
-        # print('score [before]: {}'.format(score))
-        # print('enc_mask: {}'.format(enc_mask))
-        score.data.masked_fill_(enc_mask.data.byte(), 0)  # mask to -inf before applying softmax
-        score = F.softmax(score, dim=1)
-        # print('score: {}'.format(score.size()))
+        if cov_vector is not None:
+            # print('cov_vector: {}'.format(cov_vector.size()))
+            attn_src += cov_vector
+
+        et = vt(torch.tanh(attn_src).view(batch_size*max_enc_len, -1)).view(batch_size, max_enc_len)
+
+        score = self._softmax(et, enc_mask)
 
         return score
 
-    def _get_attn_score_concat(self, batch_size, max_enc_len, coverage, enc_mask,
-                               dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys):
+
+    def _get_attn_score_fuse_concat(self, batch_size, max_enc_len, cov_vector, enc_mask,
+                                    dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys):
+
         dec_query = self.Wd(dec_hidden)
         # print('dec_query [before]: {}'.format(dec_query.size()))
         if self.attn_src == 'emb':
@@ -210,47 +245,120 @@ class DecoderRNN(BaseRNN):
             enc_keys = enc_hidden_keys
         # print('enc_keys: {}'.format(enc_keys.size()))
 
+        score = self._attn_score_concat(batch_size, max_enc_len, self.v, dec_query, enc_keys, cov_vector, enc_mask)
+        # print('score: {}'.format(score.size()))
+
+        return score, score, score
+
+    def _get_attn_score_fuse_prod(self, batch_size, max_enc_len, cov_vector, enc_mask,
+                                  dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys):
+
+        # TODO: use different dec_query
+
+        attn_score_top = None
+        attn_score_mid = None
+        attn_score_btm = None
+
+        if self.attn_level == 3:
+            dec_query_hidden = self.Wd_hidden(dec_hidden).unsqueeze(1).expand_as(enc_hidden_keys)
+            dec_query_input = self.Wd_input(dec_hidden).unsqueeze(1).expand_as(enc_input_keys)
+            dec_query_field = self.Wd_field(dec_hidden).unsqueeze(1).expand_as(enc_field_keys)
+
+            attn_score_hidden = self._attn_score_concat(batch_size, max_enc_len, self.v_hidden,
+                                                        dec_query_hidden, enc_hidden_keys, cov_vector, enc_mask)
+            attn_score_input = self._attn_score_concat(batch_size, max_enc_len, self.v_input,
+                                                       dec_query_input, enc_input_keys, None, enc_mask)
+            attn_score_field = self._attn_score_concat(batch_size, max_enc_len, self.v_field,
+                                                       dec_query_field, enc_field_keys, None, enc_mask)
+
+            attn_score_btm = attn_score_field
+            attn_score_mid = torch.mul(attn_score_input, attn_score_btm)
+            attn_score_mid = self._softmax(attn_score_mid, enc_mask)
+            attn_score_top = torch.mul(attn_score_hidden, attn_score_btm)
+            attn_score_top = self._softmax(attn_score_top, enc_mask)
+
+        elif self.attn_level == 2:
+            dec_query_field = self.Wd_field(dec_hidden).unsqueeze(1).expand_as(enc_field_keys)
+
+            attn_score_field = self._attn_score_concat(batch_size, max_enc_len, self.v_field,
+                                                       dec_query_field, enc_field_keys, None, enc_mask)
+            attn_score_btm = attn_score_field
+
+            if self.attn_src == 'emb':
+                dec_query_input = self.Wd_input(dec_hidden).unsqueeze(1).expand_as(enc_input_keys)
+
+                attn_score_input = self._attn_score_concat(batch_size, max_enc_len, self.v_input,
+                                                           dec_query_input, enc_input_keys, cov_vector, enc_mask)
+                attn_score_top = torch.mul(attn_score_input, attn_score_btm)
+                attn_score_top = self._softmax(attn_score_top, enc_mask)
+
+            elif self.attn_src == 'rnn':
+                dec_query_hidden = self.Wd_hidden(dec_hidden).unsqueeze(1).expand_as(enc_hidden_keys)
+
+                attn_score_hidden = self._attn_score_concat(batch_size, max_enc_len, self.v_hidden,
+                                                            dec_query_hidden, enc_hidden_keys, cov_vector, enc_mask)
+                attn_score_top = torch.mul(attn_score_hidden, attn_score_btm)
+                attn_score_top = self._softmax(attn_score_top, enc_mask)
+
+        else:
+            dec_query_hidden = self.Wd_hidden(dec_hidden).unsqueeze(1).expand_as(enc_hidden_keys)
+
+            attn_score_hidden = self._attn_score_concat(batch_size, max_enc_len, self.v_hidden,
+                                                        dec_query_hidden, enc_hidden_keys, cov_vector, enc_mask)
+            attn_score_top = attn_score_hidden
+
+        # print('dec_query_hidden: {}'.format(dec_query_hidden.size()))
+        # print('dec_query_input: {}'.format(dec_query_input.size()))
+        # print('dec_query_field: {}'.format(dec_query_field.size()))
+        #
+        # print('attn_score_hidden: {}'.format(attn_score_hidden))
+        # print('attn_score_input: {}'.format(attn_score_input))
+        # print('attn_score_field: {}'.format(attn_score_field))
+        #
+        # print('attn_score_top: {}'.format(attn_score_top))
+        # print('attn_score_mid: {}'.format(attn_score_mid))
+        # print('attn_score_btm: {}'.format(attn_score_btm))
+
+        return attn_score_top, attn_score_mid, attn_score_btm
+
+
+    def _get_attn_scores(self, batch_size, max_enc_len, coverage, enc_mask,
+                         dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys):
+
         if self.use_cov_attn:
             cov_vector = self.Wc(coverage.view(-1, 1)).view(batch_size, max_enc_len, -1)
         else:
             cov_vector = None
         # print('cov_vector: {}'.format(cov_vector.size()))
 
-        attn_scores = self._score_concat(self.v, dec_query, enc_keys, cov_vector, batch_size, max_enc_len, enc_mask)
-        # print('attn_scores: {}'.format(attn_scores.size()))
-
-        return attn_scores, None, None
-
-    def _get_attn_scores(self, batch_size, max_enc_len, coverage, enc_mask,
-                         dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys):
         if self.attn_fuse == 'concat':
-            return self._get_attn_score_concat(batch_size, max_enc_len, coverage, enc_mask,
-                                               dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys)
+            return self._get_attn_score_fuse_concat(batch_size, max_enc_len, cov_vector, enc_mask,
+                                                    dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys)
         else:
-            return self._get_attn_score_prod(batch_size, max_enc_len, coverage, enc_mask,
-                                             dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys)
+            return self._get_attn_score_fuse_prod(batch_size, max_enc_len, cov_vector, enc_mask,
+                                                  dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys)
 
     def _get_contexts(self, attn_scores, enc_hidden_vals, enc_input_vals, enc_field_vals):
         if self.attn_level == 3:
-            enc_hidden_context = attn_scores.unsqueeze(1).bmm(enc_hidden_vals).squeeze(1)
-            enc_input_context = attn_scores.unsqueeze(1).bmm(enc_input_vals).squeeze(1)
-            enc_field_context = attn_scores.unsqueeze(1).bmm(enc_field_vals).squeeze(1)
+            enc_hidden_context = attn_scores[0].unsqueeze(1).bmm(enc_hidden_vals).squeeze(1)
+            enc_input_context = attn_scores[1].unsqueeze(1).bmm(enc_input_vals).squeeze(1)
+            enc_field_context = attn_scores[2].unsqueeze(1).bmm(enc_field_vals).squeeze(1)
             # output
             enc_output_context = torch.cat((enc_hidden_context, enc_input_context, enc_field_context), 1)
             # p_gen
             enc_context_proj = self.w_r(enc_hidden_context) + self.w_e(enc_input_context) + self.w_f(enc_field_context)
 
         elif self.attn_level == 2:
-            enc_field_context = attn_scores.unsqueeze(1).bmm(enc_field_vals).squeeze(1)
+            enc_field_context = attn_scores[2].unsqueeze(1).bmm(enc_field_vals).squeeze(1)
             if self.attn_src == 'emb':
-                enc_input_context = attn_scores.unsqueeze(1).bmm(enc_input_vals).squeeze(1)
+                enc_input_context = attn_scores[0].unsqueeze(1).bmm(enc_input_vals).squeeze(1)
                 # output
                 enc_output_context = torch.cat((enc_input_context, enc_field_context), 1)
                 # p_gen
                 enc_context_proj = self.w_e(enc_input_context) + self.w_f(enc_field_context)
 
             elif self.attn_src == 'rnn':
-                enc_hidden_context = attn_scores.unsqueeze(1).bmm(enc_hidden_vals).squeeze(1)
+                enc_hidden_context = attn_scores[0].unsqueeze(1).bmm(enc_hidden_vals).squeeze(1)
                 # output
                 enc_output_context = torch.cat((enc_hidden_context, enc_field_context), 1)
                 # p_gen
@@ -258,7 +366,7 @@ class DecoderRNN(BaseRNN):
 
         else:
             # output
-            enc_output_context = attn_scores.unsqueeze(1).bmm(enc_hidden_vals).squeeze(1)
+            enc_output_context = attn_scores[0].unsqueeze(1).bmm(enc_hidden_vals).squeeze(1)
             # p_gen
             enc_context_proj = self.w_r(enc_output_context)
 
@@ -273,7 +381,7 @@ class DecoderRNN(BaseRNN):
                      ):
         # print('input_ids: {}'.format(input_ids.size()))
 
-        attn_scores, _, _ = self._get_attn_scores(batch_size, max_enc_len, coverage, enc_mask,
+        attn_scores = self._get_attn_scores(batch_size, max_enc_len, coverage, enc_mask,
                                                   dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys)
 
         enc_output_context, enc_context_proj = self._get_contexts(attn_scores, enc_hidden_vals, enc_input_vals, enc_field_vals)
@@ -289,7 +397,9 @@ class DecoderRNN(BaseRNN):
         weighted_Pvocab = p_vocab * p_gen
         # print('weighted_Pvocab: {}'.format(weighted_Pvocab.size()))
 
-        weighted_attn = (1-p_gen) * attn_scores
+        attn_weights = attn_scores[0]
+
+        weighted_attn = (1-p_gen) * attn_weights
         # print('weighted_attn: {}'.format(weighted_attn.size()))
 
         # print('max_source_oov: {}'.format(max_source_oov))
@@ -309,7 +419,7 @@ class DecoderRNN(BaseRNN):
         combined_vocab = combined_vocab.scatter_add(1, input_ids, weighted_attn)
         # print('combined_vocab: {}'.format(combined_vocab.size()))
 
-        return combined_vocab, attn_scores
+        return combined_vocab, attn_weights
 
     def forward(self, max_source_oov=0, targets=None, targets_id=None, input_ids=None,
                 enc_hidden=None, enc_input=None, enc_state=None, enc_mask=None, enc_field=None, enc_pos=None,
@@ -357,7 +467,7 @@ class DecoderRNN(BaseRNN):
                 dec_hidden = hidden[:, step, :]
                 decoder_input = decoder_inputs[:, step, :]
 
-                combined_vocab, attn_scores = self._decode_step(batch_size, input_ids, coverage, max_source_oov,
+                combined_vocab, attn_weights = self._decode_step(batch_size, input_ids, coverage, max_source_oov,
                                                                 dec_hidden, decoder_input,
                                                                 enc_mask, max_enc_len,
                                                                 enc_hidden_keys, enc_input_keys, enc_field_keys,
@@ -371,10 +481,10 @@ class DecoderRNN(BaseRNN):
                 lm_loss.append(_lm_loss)
 
                 if self.use_cov_loss:
-                    coverage = coverage + attn_scores
+                    coverage = coverage + attn_weights
                     # print('coverage: {}'.format(coverage.size()))
-                    # take minimum across both attn_scores and coverage
-                    _cov_loss, _ = torch.stack((coverage, attn_scores), 2).min(2)
+                    # take minimum across both attn_weights and coverage
+                    _cov_loss, _ = torch.stack((coverage, attn_weights), 2).min(2)
                     # print('_cov_loss: {}'.format(_cov_loss.size()))
                     cov_loss.append(_cov_loss.sum(1))
 
@@ -408,7 +518,7 @@ class DecoderRNN(BaseRNN):
         # step through decoder hidden states
         for step in range(max_length):
             dec_hidden, _c = self.rnn(decoder_input, decoder_hidden_init)
-            combined_vocab, attn_scores = self._decode_step(batch_size, input_ids, coverage, max_source_oov,
+            combined_vocab, attn_weights = self._decode_step(batch_size, input_ids, coverage, max_source_oov,
                                                             dec_hidden.squeeze(1), decoder_input.squeeze(1),
                                                             enc_mask, max_enc_len,
                                                             enc_hidden_keys, enc_input_keys, enc_field_keys,
@@ -429,7 +539,7 @@ class DecoderRNN(BaseRNN):
                 enc_mask = torch.where(enc_mask > tmp_mask, enc_mask, tmp_mask)
 
             if fig:
-                attn.append(attn_scores)
+                attn.append(attn_weights)
             decoded_outputs.append(symbols.clone())
             eos_batch = symbols.data.eq(self.eos_id)
 
@@ -455,7 +565,7 @@ class DecoderRNN(BaseRNN):
             decoder_input = self.embedding(symbols)
             decoder_hidden_init = _c
             if self.use_cov_loss:
-                coverage = coverage + attn_scores
+                coverage = coverage + attn_weights
 
             # stop if all finished
             if all(finished):

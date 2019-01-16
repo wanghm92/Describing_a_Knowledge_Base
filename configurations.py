@@ -15,11 +15,11 @@ class Config(object):
 class ConfigTest(object):
     cell = "GRU"
     emsize = 30
-    pemsize = 30
+    pemsize = 5
     nlayers = 1
     lr = 0.001
     epochs = 2
-    batch_size = 10
+    batch_size = 2
     dropout = 0
     directions = 2
     max_grad_norm = 1
