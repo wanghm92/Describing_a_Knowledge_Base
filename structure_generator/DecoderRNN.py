@@ -221,18 +221,7 @@ class DecoderRNN(BaseRNN):
 
         return attn_scores
 
-    def _decode_step(self,
-                     batch_size, input_ids, coverage, max_source_oov,
-                     dec_hidden, decoder_input,
-                     enc_mask, max_enc_len,
-                     enc_hidden_keys, enc_input_keys, enc_field_keys,
-                     enc_hidden_vals, enc_input_vals, enc_field_vals
-                     ):
-        # print('input_ids: {}'.format(input_ids.size()))
-
-        attn_scores = self._attn_score(batch_size, max_enc_len, coverage, enc_mask,
-                                       dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys)
-
+    def _get_contexts(self, attn_scores, enc_hidden_vals, enc_input_vals, enc_field_vals):
         if self.attn_level == 3:
             enc_hidden_context = attn_scores.unsqueeze(1).bmm(enc_hidden_vals).squeeze(1)
             enc_input_context = attn_scores.unsqueeze(1).bmm(enc_input_vals).squeeze(1)
@@ -263,6 +252,22 @@ class DecoderRNN(BaseRNN):
             enc_output_context = attn_scores.unsqueeze(1).bmm(enc_hidden_vals).squeeze(1)
             # p_gen
             enc_context_proj = self.w_r(enc_output_context)
+
+        return enc_output_context, enc_context_proj
+
+    def _decode_step(self,
+                     batch_size, input_ids, coverage, max_source_oov,
+                     dec_hidden, decoder_input,
+                     enc_mask, max_enc_len,
+                     enc_hidden_keys, enc_input_keys, enc_field_keys,
+                     enc_hidden_vals, enc_input_vals, enc_field_vals
+                     ):
+        # print('input_ids: {}'.format(input_ids.size()))
+
+        attn_scores = self._attn_score(batch_size, max_enc_len, coverage, enc_mask,
+                                       dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys)
+
+        enc_output_context, enc_context_proj = self._get_contexts(attn_scores, enc_hidden_vals, enc_input_vals, enc_field_vals)
 
         # print('enc_output_context: {}'.format(enc_output_context.size()))
         # print('enc_context_proj: {}'.format(enc_context_proj.size()))
