@@ -215,7 +215,7 @@ class DecoderRNN(BaseRNN):
 
     def _attn_score_concat(self, batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask):
 
-        attn_src = dec_query + enc_keys
+        attn_src = dec_query.unsqueeze(1).expand_as(enc_keys) + enc_keys
         # print('attn_src: {}'.format(attn_src.size()))
 
         if cov_vector is not None:
@@ -228,6 +228,19 @@ class DecoderRNN(BaseRNN):
 
         return score
 
+    def _attn_score_dot(self, dec_query, enc_keys, enc_mask):
+
+        et = dec_query.unsqueeze(1).bmm(enc_keys.transpose(1, 2)).squeeze(1)
+        score = self._softmax(et, enc_mask)
+
+        return score
+
+    def _attn_score(self, batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask, attn_type='concat'):
+
+        if attn_type == 'concat':
+            return self._attn_score_concat(batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask)
+        else:
+            return self._attn_score_dot(dec_query, enc_keys, enc_mask)
 
     def _get_attn_score_fuse_concat(self, batch_size, max_enc_len, cov_vector, enc_mask,
                                     dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys):
@@ -251,71 +264,80 @@ class DecoderRNN(BaseRNN):
             enc_keys = enc_hidden_keys
         # print('enc_keys: {}'.format(enc_keys.size()))
 
-        score = self._attn_score_concat(batch_size, max_enc_len, self.v, dec_query, enc_keys, cov_vector, enc_mask)
+        score = self._attn_score(batch_size, max_enc_len, self.v, dec_query, enc_keys, cov_vector, enc_mask)
         # print('score: {}'.format(score.size()))
 
         return score, score, score
 
-    def _get_attn_score_fuse_prod(self, batch_size, max_enc_len, cov_vector, enc_mask,
-                                  dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys):
+    def _get_attn_score_fuse_hierarchical(self, batch_size, max_enc_len, cov_vector, enc_mask, dec_hidden,
+                                          enc_hidden_keys, enc_input_keys, enc_field_keys, attn_type='concat'):
 
         attn_score_top = None
         attn_score_mid = None
         attn_score_btm = None
 
         if self.attn_level == 3:
-            dec_query_hidden = self.Wd_hidden(dec_hidden).unsqueeze(1).expand_as(enc_hidden_keys)
-            dec_query_input = self.Wd_input(dec_hidden).unsqueeze(1).expand_as(enc_input_keys)
-            dec_query_field = self.Wd_field(dec_hidden).unsqueeze(1).expand_as(enc_field_keys)
+            dec_query_hidden = self.Wd_hidden(dec_hidden)
+            dec_query_input = self.Wd_input(dec_hidden)
+            dec_query_field = self.Wd_field(dec_hidden)
 
-            attn_score_hidden = self._attn_score_concat(batch_size, max_enc_len, self.v_hidden,
-                                                        dec_query_hidden, enc_hidden_keys, cov_vector, enc_mask)
-            attn_score_input = self._attn_score_concat(batch_size, max_enc_len, self.v_input,
-                                                       dec_query_input, enc_input_keys, None, enc_mask)
-            attn_score_field = self._attn_score_concat(batch_size, max_enc_len, self.v_field,
-                                                       dec_query_field, enc_field_keys, None, enc_mask)
+            attn_score_hidden = self._attn_score(batch_size, max_enc_len, self.v_hidden, dec_query_hidden, 
+                                                 enc_hidden_keys, cov_vector, enc_mask, attn_type=attn_type)
+            attn_score_input = self._attn_score(batch_size, max_enc_len, self.v_input, dec_query_input,
+                                                enc_input_keys, None, enc_mask, attn_type=attn_type)
+            attn_score_field = self._attn_score(batch_size, max_enc_len, self.v_field, dec_query_field, 
+                                                enc_field_keys, None, enc_mask, attn_type=attn_type)
 
             attn_score_btm = attn_score_field
-            attn_score_mid = torch.mul(attn_score_input, attn_score_btm)
-            attn_score_mid = self._softmax(attn_score_mid, enc_mask)
-            attn_score_top = torch.mul(attn_score_hidden, attn_score_btm)
-            attn_score_top = self._softmax(attn_score_top, enc_mask)
+            if self.attn_fuse == 'prod':
+                attn_score_mid = torch.mul(attn_score_input, attn_score_btm)
+                attn_score_mid = self._softmax(attn_score_mid, enc_mask)
+                attn_score_top = torch.mul(attn_score_hidden, attn_score_btm)
+                attn_score_top = self._softmax(attn_score_top, enc_mask)
+            else:
+                attn_score_mid = attn_score_input
+                attn_score_top = attn_score_hidden
 
         elif self.attn_level == 2:
-            dec_query_field = self.Wd_field(dec_hidden).unsqueeze(1).expand_as(enc_field_keys)
+            dec_query_field = self.Wd_field(dec_hidden)
 
-            attn_score_field = self._attn_score_concat(batch_size, max_enc_len, self.v_field,
-                                                       dec_query_field, enc_field_keys, None, enc_mask)
+            attn_score_field = self._attn_score(batch_size, max_enc_len, self.v_field, dec_query_field, 
+                                                enc_field_keys, None, enc_mask, attn_type=attn_type)
             attn_score_btm = attn_score_field
 
             if self.attn_src == 'emb':
-                dec_query_input = self.Wd_input(dec_hidden).unsqueeze(1).expand_as(enc_input_keys)
+                dec_query_input = self.Wd_input(dec_hidden)
 
-                attn_score_input = self._attn_score_concat(batch_size, max_enc_len, self.v_input,
-                                                           dec_query_input, enc_input_keys, cov_vector, enc_mask)
-                attn_score_top = torch.mul(attn_score_input, attn_score_btm)
-                attn_score_top = self._softmax(attn_score_top, enc_mask)
+                attn_score_input = self._attn_score(batch_size, max_enc_len, self.v_input, dec_query_input, 
+                                                    enc_input_keys, cov_vector, enc_mask, attn_type=attn_type)
+                if self.attn_fuse == 'prod':
+                    attn_score_top = torch.mul(attn_score_input, attn_score_btm)
+                    attn_score_top = self._softmax(attn_score_top, enc_mask)
+                else:
+                    attn_score_top = attn_score_input
 
             elif self.attn_src == 'rnn':
-                dec_query_hidden = self.Wd_hidden(dec_hidden).unsqueeze(1).expand_as(enc_hidden_keys)
+                dec_query_hidden = self.Wd_hidden(dec_hidden)
 
-                attn_score_hidden = self._attn_score_concat(batch_size, max_enc_len, self.v_hidden,
-                                                            dec_query_hidden, enc_hidden_keys, cov_vector, enc_mask)
-                attn_score_top = torch.mul(attn_score_hidden, attn_score_btm)
-                attn_score_top = self._softmax(attn_score_top, enc_mask)
+                attn_score_hidden = self._attn_score(batch_size, max_enc_len, self.v_hidden, dec_query_hidden, 
+                                                     enc_hidden_keys, cov_vector, enc_mask, attn_type=attn_type)
+                if self.attn_fuse == 'prod':
+                    attn_score_top = torch.mul(attn_score_hidden, attn_score_btm)
+                    attn_score_top = self._softmax(attn_score_top, enc_mask)
+                else:
+                    attn_score_top = attn_score_hidden
 
         else:
-            dec_query_hidden = self.Wd_hidden(dec_hidden).unsqueeze(1).expand_as(enc_hidden_keys)
+            dec_query_hidden = self.Wd_hidden(dec_hidden)
 
-            attn_score_hidden = self._attn_score_concat(batch_size, max_enc_len, self.v_hidden,
-                                                        dec_query_hidden, enc_hidden_keys, cov_vector, enc_mask)
+            attn_score_hidden = self._attn_score(batch_size, max_enc_len, self.v_hidden, dec_query_hidden, 
+                                                 enc_hidden_keys, cov_vector, enc_mask, attn_type=attn_type)
             attn_score_top = attn_score_hidden
 
         return attn_score_top, attn_score_mid, attn_score_btm
 
-
-    def _get_attn_scores(self, batch_size, max_enc_len, coverage, enc_mask,
-                         dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys):
+    def _get_attn_scores(self, batch_size, max_enc_len, coverage, enc_mask, dec_hidden, 
+                         enc_hidden_keys, enc_input_keys, enc_field_keys, attn_type):
 
         if self.use_cov_attn:
             cov_vector = self.Wc(coverage.view(-1, 1)).view(batch_size, max_enc_len, -1)
@@ -327,8 +349,8 @@ class DecoderRNN(BaseRNN):
             return self._get_attn_score_fuse_concat(batch_size, max_enc_len, cov_vector, enc_mask,
                                                     dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys)
         else:
-            return self._get_attn_score_fuse_prod(batch_size, max_enc_len, cov_vector, enc_mask,
-                                                  dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys)
+            return self._get_attn_score_fuse_hierarchical(batch_size, max_enc_len, cov_vector, enc_mask, dec_hidden,
+                                                          enc_hidden_keys, enc_input_keys, enc_field_keys, attn_type)
 
     def _get_contexts(self, attn_scores, enc_hidden_vals, enc_input_vals, enc_field_vals):
         if self.attn_level == 3:
@@ -379,8 +401,8 @@ class DecoderRNN(BaseRNN):
                      ):
         # print('input_ids: {}'.format(input_ids.size()))
 
-        attn_scores = self._get_attn_scores(batch_size, max_enc_len, coverage, enc_mask,
-                                                  dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys)
+        attn_scores = self._get_attn_scores(batch_size, max_enc_len, coverage, enc_mask, dec_hidden, 
+                                            enc_hidden_keys, enc_input_keys, enc_field_keys, self.attn_type)
 
         enc_output_context, enc_context_proj = self._get_contexts(attn_scores, enc_hidden_vals, enc_input_vals, enc_field_vals)
 

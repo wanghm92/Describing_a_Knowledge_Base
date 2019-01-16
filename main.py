@@ -40,9 +40,9 @@ parser.add_argument('--type', type=int, default=0, choices=[0, 1],
 parser.add_argument('--mask', action='store_true',
                     help='false(0)/true(1)')
 parser.add_argument('--attn_type', type=str, default='concat', choices=['concat', 'dot'],
-                    help='type of attention score calculation: concat, dot (NOT SUPPORTED)')
-parser.add_argument('--attn_fuse', type=str, default='concat', choices=['concat', 'prod'],
-                    help='type of attention score aggregation: concat, prod')
+                    help='type of attention score calculation: concat, dot')
+parser.add_argument('--attn_fuse', type=str, default='concat', choices=['concat', 'prod', 'no'],
+                    help='type of attention score aggregation: concat, prod, no')
 parser.add_argument('--attn_level', type=int, default=2, choices=[1, 2, 3],
                     help='levels of attention: 1(hidden only), 2(hidden+field), 3(hidden+word+field) hidden=rnn/emb')
 parser.add_argument('--attn_src', type=str, default='emb', choices=['emb', 'rnn'],
@@ -166,8 +166,8 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         cand, ref, eval_loss = predictor.preeval_batch(v_dataset)
         writer.add_scalar('valid/loss', eval_loss, epoch)
         L.info('Result:')
-        print('ref: ', ref[1][0])
-        print('cand: {}'.format(cand[1]))
+        L.info('ref: {}'.format(ref[1][0]))
+        L.info('cand: {}'.format(cand[1]))
         eval_file_out = "{}/evaluations/valid.epoch_{}.cand.live.txt".format(save_file_dir, epoch)
         with open(eval_file_out, 'w+') as fout:
             for c in range(len(cand)):
@@ -269,7 +269,7 @@ if __name__ == "__main__":
             L.info('-' * 89)
             L.info('Exiting from training early')
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
-        L.info("Read $-{}-$ data")
+        L.info("Read $-{}-$ data".format(args.dataset))
         predictor = Predictor(model, dataset.vocab, args.cuda)
         L.info("number of test examples: %d" % dataset.len)
 
@@ -283,7 +283,7 @@ if __name__ == "__main__":
         L.info("model restored from epoch-{}: {}".format(load_epoch, args.save))
 
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
-        L.info("Read $-{}-$ data")
+        L.info("Read $-{}-$ data".format(args.dataset))
         predictor = Predictor(model, dataset.vocab, args.cuda)
         L.info("number of test examples: %d" % dataset.len)
 
@@ -291,7 +291,7 @@ if __name__ == "__main__":
         cand, ref, _ = predictor.preeval_batch(dataset)
 
         L.info('Result:')
-        L.info('ref: ', ref[1][0])
+        L.info('ref: {}'.format(ref[1][0]))
         L.info('cand: {}'.format(cand[1]))
         cand_file_out = "{}/evaluations/{}.epoch_{}.cand.txt".format(save_file_dir, args.dataset, load_epoch)
         with open(cand_file_out, 'w+') as fout:
@@ -311,7 +311,7 @@ if __name__ == "__main__":
         L.info("model restored from epoch-{}: {}".format(load_epoch, args.save))
 
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=1)
-        L.info("Read $-{}-$ data")
+        L.info("Read $-{}-$ data".format(args.dataset))
         predictor = Predictor(model, dataset.vocab, args.cuda)
 
         while True:
