@@ -271,6 +271,11 @@ class DecoderRNN(BaseRNN):
 
         return score, score, score
 
+    def _normalize(self, t, mask):
+        t.masked_fill_(mask.data.byte(), sys.float_info.epsilon)  # mask to epsilon before normalization
+        normalizer = t.sum(dim=-1, keepdim=True).add_(sys.float_info.epsilon)
+        return torch.div(t, normalizer)
+
     def _get_attn_score_fuse_hierarchical(self, batch_size, max_enc_len, cov_vector, enc_mask, dec_hidden,
                                           enc_hidden_keys, enc_input_keys, enc_field_keys, attn_type='concat'):
 
@@ -292,10 +297,8 @@ class DecoderRNN(BaseRNN):
 
             attn_score_btm = attn_score_field
             if self.attn_fuse == 'prod':
-                attn_score_mid = torch.mul(attn_score_input, attn_score_btm)
-                attn_score_mid = self._softmax(attn_score_mid, enc_mask)
-                attn_score_top = torch.mul(attn_score_hidden, attn_score_btm)
-                attn_score_top = self._softmax(attn_score_top, enc_mask)
+                attn_score_mid = self._normalize(torch.mul(attn_score_input, attn_score_btm), enc_mask)
+                attn_score_top = self._normalize(torch.mul(attn_score_hidden, attn_score_btm), enc_mask)
             else:
                 attn_score_mid = attn_score_input
                 attn_score_top = attn_score_hidden
@@ -313,8 +316,7 @@ class DecoderRNN(BaseRNN):
                 attn_score_input = self._attn_score(batch_size, max_enc_len, self.v_input, dec_query_input, 
                                                     enc_input_keys, cov_vector, enc_mask, attn_type=attn_type)
                 if self.attn_fuse == 'prod':
-                    attn_score_top = torch.mul(attn_score_input, attn_score_btm)
-                    attn_score_top = self._softmax(attn_score_top, enc_mask)
+                    attn_score_top = self._normalize(torch.mul(attn_score_input, attn_score_btm), enc_mask)
                 else:
                     attn_score_top = attn_score_input
 
@@ -324,8 +326,7 @@ class DecoderRNN(BaseRNN):
                 attn_score_hidden = self._attn_score(batch_size, max_enc_len, self.v_hidden, dec_query_hidden, 
                                                      enc_hidden_keys, cov_vector, enc_mask, attn_type=attn_type)
                 if self.attn_fuse == 'prod':
-                    attn_score_top = torch.mul(attn_score_hidden, attn_score_btm)
-                    attn_score_top = self._softmax(attn_score_top, enc_mask)
+                    attn_score_top = self._normalize(torch.mul(attn_score_hidden, attn_score_btm), enc_mask)
                 else:
                     attn_score_top = attn_score_hidden
 
