@@ -362,8 +362,8 @@ class DecoderRNN(BaseRNN):
             # output
             enc_output_context = torch.cat((enc_hidden_context, enc_input_context), 1)
 
+            enc_field_context = attn_scores[2].unsqueeze(1).bmm(enc_field_vals).squeeze(1)
             if self.field_context:
-                enc_field_context = attn_scores[2].unsqueeze(1).bmm(enc_field_vals).squeeze(1)
                 enc_output_context = torch.cat((enc_output_context, enc_field_context), 1)
 
             # p_gen
