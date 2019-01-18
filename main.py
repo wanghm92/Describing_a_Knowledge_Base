@@ -39,6 +39,7 @@ parser.add_argument('--type', type=int, default=0, choices=[0, 1],
                     help='person(0)/animal(1)')
 parser.add_argument('--mask', action='store_true',
                     help='false(0)/true(1)')
+
 parser.add_argument('--attn_type', type=str, default='concat', choices=['concat', 'dot'],
                     help='type of attention score calculation: concat, dot')
 parser.add_argument('--attn_fuse', type=str, default='concat', choices=['concat', 'prod', 'no'],
@@ -47,16 +48,19 @@ parser.add_argument('--attn_level', type=int, default=2, choices=[1, 2, 3],
                     help='levels of attention: 1(hidden only), 2(hidden+field), 3(hidden+word+field) hidden=rnn/emb')
 parser.add_argument('--attn_src', type=str, default='emb', choices=['emb', 'rnn'],
                     help='encodings for attention layer: RNN hidden state(rnn) or word embeddings(emb)')
-parser.add_argument('--field_self_att', action='store_true',
-                    help='whether use field self-attention')
+
 parser.add_argument('--use_cov_attn', action='store_true',
                     help='whether use coverage attention')
 parser.add_argument('--use_cov_loss', action='store_true',
                     help='whether use coverage loss')
+
+parser.add_argument('--field_self_att', action='store_true',
+                    help='whether use field self-attention')
 parser.add_argument('--field_concat_pos', action='store_true',
                     help='whether concat pos embeddings to field embeddings for attention calculation')
 parser.add_argument('--field_context', action='store_false',
                     help='whether pass context vector of field embeddings to output layer')
+
 args = parser.parse_args()
 
 # ------------------------------------- checking attn_src -------------------------------------- #
@@ -147,8 +151,11 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         torch.set_grad_enabled(True)
         epoch_loss = 0
 
-        batch_indices = list(range(len_batch))
-        random.shuffle(batch_indices)
+        if epoch == 0:
+            batch_indices = list(range(len_batch, 0, -1))
+        else:
+            batch_indices = list(range(len_batch))
+            random.shuffle(batch_indices)
 
         for idx, batch_idx in enumerate(batch_indices):
             loss, num_examples = train_batch(t_dataset, batch_idx, model, teacher_forcing_ratio)
@@ -195,9 +202,9 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
             suffix = ""
         if len(suffix) > 0:
             L.info("model at epoch #{} saved".format(epoch))
+            torch.save(model.state_dict(), "{}{}.{}".format(save_prefix, suffix, epoch))
         else:
             L.info("[*** {} ***] model at epoch #{} saved".format(suffix, epoch))
-        torch.save(model.state_dict(), "{}{}.{}".format(save_prefix, suffix, epoch))
 
         # epoch_score = 2*rouge_l*bleu_4/(rouge_l + bleu_4)
 
@@ -250,6 +257,8 @@ if __name__ == "__main__":
             train_epoches(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1)
         except KeyboardInterrupt:
             L.info('-' * 89)
+            torch.save(model.state_dict(), "{}/model_before_kill.pkl".format(save_file_dir))
+            L.info("Model saved at: {}/model_before_kill.pkl".format(save_file_dir))
             L.info('Exiting from training early')
 
     # ----------------------------------- resume train ----------------------------------------- #

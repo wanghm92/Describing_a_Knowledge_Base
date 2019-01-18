@@ -32,7 +32,7 @@ class Vocabulary:
     def _build_vocabulary(self, corpus, field):
         vocabulary = Counter(word for sent in corpus for word in sent)
         field_vocab = Counter(word for sent in field for word in sent)
-        print(field_vocab)
+        # print(field_vocab)
         if self.max_words:
             vocabulary = {word: freq for word,
                           freq in vocabulary.most_common(self.max_words)}

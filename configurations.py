@@ -11,6 +11,19 @@ class Config(object):
     max_grad_norm = 10
     max_len = 100
 
+class ConfigWikibio(object):
+    cell = "GRU"
+    emsize = 256
+    pemsize = 5
+    nlayers = 1
+    lr = 0.001
+    epochs = 60
+    batch_size = 32
+    dropout = 0
+    directions = 2
+    max_grad_norm = 10
+    max_len = 100
+
 
 class ConfigTest(object):
     cell = "GRU"

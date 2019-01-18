@@ -42,7 +42,7 @@ class Vocabulary:
         if self.min_frequency_field:
             field_vocab = {word: freq for word, freq in field_vocab.items()
                            if freq >= self.min_frequency_field}
-        print(field_vocab)
+        # print(field_vocab)
 
         self.vocabulary = Counter(vocabulary)
         self.vocabulary.update(field_vocab)
@@ -89,6 +89,7 @@ class Vocabulary:
                     cnt += 1
                 else:
                     _o_source.append(source_oov[word] + self.size)
+                # NOTE: use field type embedding for OOV field values
                 _source.append(self.word2idx.get(table[word], self.word2idx['<UNK_FIELD>']))
         return _o_source, source_oov, _source
 
@@ -99,11 +100,13 @@ class Vocabulary:
                 _o_target.append(self.word2idx[word])
                 _target.append(self.word2idx[word])
             except KeyError:
+                # NOTE: use UNK for text words not in source OOVs
                 if word not in source_oov:
                     # print(word)
                     _o_target.append(self.word2idx['<UNK>'])
                     _target.append(self.word2idx['<UNK>'])
                 else:
+                    # NOTE: use source_oov idx for OOV text words but appear in source OOVs
                     _o_target.append(source_oov[word] + self.size)
                     _target.append(self.word2idx.get(table[word], self.word2idx['<UNK_FIELD>']))
         return self.add_start_end(_o_target), self.add_start_end(_target)
@@ -153,6 +156,7 @@ class Table2text_seq:
         print("vocab size = {}".format(self.vocab.size))
 
     def load_data_light(self, path):
+        print("Loading data $LIGHT$ from {}".format(path))
         prefix = "{}/table2text_nlg/describe_kb/outputs".format(HOME)
         if self.type == 0:
             vocab_path_pkl = "{}/wikibio_vocab.pkl".format(prefix)
