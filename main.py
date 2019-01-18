@@ -9,7 +9,7 @@ from utils.loader import Table2text_seq
 from structure_generator.EncoderRNN import EncoderRNN
 from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq
-from configurations import Config, ConfigTest
+from configurations import Config, ConfigSmall
 from eval import Evaluate
 import random, os, pprint, logging
 from tensorboardX import SummaryWriter
@@ -39,6 +39,8 @@ parser.add_argument('--type', type=int, default=0, choices=[0, 1],
                     help='person(0)/animal(1)')
 parser.add_argument('--mask', action='store_true',
                     help='false(0)/true(1)')
+parser.add_argument('--batch', type=int, default='64',
+                    help='batch size')
 
 parser.add_argument('--attn_type', type=str, default='concat', choices=['concat', 'dot'],
                     help='type of attention score calculation: concat, dot')
@@ -60,6 +62,9 @@ parser.add_argument('--field_concat_pos', action='store_true',
                     help='whether concat pos embeddings to field embeddings for attention calculation')
 parser.add_argument('--field_context', action='store_false',
                     help='whether pass context vector of field embeddings to output layer')
+
+parser.add_argument('--shuffle', action='store_false',
+                    help='whether to shuffle the batches during each epoch')
 
 args = parser.parse_args()
 
@@ -91,10 +96,7 @@ if not os.path.exists(save_file_dir):
 # -------------------------------- Hyperparams and Tensorboard ------------------------------------ #
 # config = ConfigTest()
 config = Config()
-if args.type == 0:
-    config.batch_size = 128
-else:
-    config.batch_size = 64
+config.batch_size = args.batch
 
 summary_dir = os.path.join(save_file_dir, "summary")
 if not os.path.exists(summary_dir):
@@ -151,10 +153,8 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         torch.set_grad_enabled(True)
         epoch_loss = 0
 
-        if epoch == 0:
-            batch_indices = list(range(len_batch, 0, -1))
-        else:
-            batch_indices = list(range(len_batch))
+        batch_indices = list(range(len_batch, 0, -1)) # start from the short ones
+        if args.shuffle:
             random.shuffle(batch_indices)
 
         for idx, batch_idx in enumerate(batch_indices):
