@@ -248,12 +248,6 @@ class DecoderRNN(BaseRNN):
                                     dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys):
 
         dec_query = self.Wd(dec_hidden)
-        # print('dec_query [before]: {}'.format(dec_query.size()))
-        if self.attn_src == 'emb':
-            dec_query = dec_query.unsqueeze(1).expand_as(enc_input_keys)
-        elif self.attn_src == 'rnn':
-            dec_query = dec_query.unsqueeze(1).expand_as(enc_hidden_keys)
-        # print('dec_query [after]: {}'.format(dec_query.size()))
 
         if self.attn_level == 3:
             enc_keys = enc_hidden_keys + enc_input_keys + enc_field_keys
