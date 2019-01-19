@@ -4,8 +4,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from predictor import Predictor
-from utils.loader import Table2text_seq
-# from utils.loader_wikibio import Table2text_seq
+# from utils.loader import Table2text_seq
+from utils.loader_wikibio import Table2text_seq
 from structure_generator.EncoderRNN import EncoderRNN
 from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq
@@ -153,7 +153,7 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         torch.set_grad_enabled(True)
         epoch_loss = 0
 
-        batch_indices = list(range(len_batch, 0, -1)) # start from the short ones
+        batch_indices = list(range(len_batch))  # start from the short ones
         if args.shuffle:
             random.shuffle(batch_indices)
 
