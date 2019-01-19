@@ -540,16 +540,16 @@ class DecoderRNN(BaseRNN):
         for step in range(max_length):
             dec_hidden, _c = self.rnn(decoder_input, decoder_hidden_init)
             combined_vocab, attn_weights = self._decode_step(batch_size, input_ids, coverage, max_source_oov,
-                                                            dec_hidden.squeeze(1), decoder_input.squeeze(1),
-                                                            enc_mask, max_enc_len,
-                                                            enc_hidden_keys, enc_input_keys, enc_field_keys,
-                                                            enc_hidden_vals, enc_input_vals, enc_field_vals)
+                                                             dec_hidden.squeeze(1), decoder_input.squeeze(1),
+                                                             enc_mask, max_enc_len,
+                                                             enc_hidden_keys, enc_input_keys, enc_field_keys,
+                                                             enc_hidden_vals, enc_input_vals, enc_field_vals)
 
             combined_vocab[:, self.unk_id] = 0  # NOTE: not allow decoder to output UNK
 
-            # greedy decoding: get word indices and logits
-            logits, symbols = combined_vocab.topk(1)
-            logits = logits.add_(sys.float_info.epsilon)
+            # greedy decoding: get word indices and probs
+            probs, symbols = combined_vocab.topk(1)
+            probs = probs.add_(sys.float_info.epsilon)
 
             if self.mask:
                 tmp_mask = torch.zeros_like(enc_mask, dtype=torch.uint8)
@@ -562,11 +562,15 @@ class DecoderRNN(BaseRNN):
             if fig:
                 attn.append(attn_weights)
             decoded_outputs.append(symbols.clone())
-            eos_batch = symbols.data.eq(self.eos_id)
+            eos_batch = symbols.data.ne(self.eos_id)
 
             # record eval loss
             target_mask_step = eos_batch.squeeze(1).detach()
-            batch_loss = logits.log().mul(-1) * target_mask_step.float()
+
+            logits = probs.log()
+            nll = logits.mul(-1)
+            batch_loss = nll * target_mask_step.float()
+
             losses.append(batch_loss.mean().item())
 
             # check if all samples finished at the eos token

@@ -41,8 +41,8 @@ class Predictor(object):
         for batch_idx in tqdm(range(total_batches)):
             batch_s, batch_o_s, batch_f, batch_pf, batch_pb, sources, targets, fields, list_oovs, source_len, \
                 max_source_oov, w2fs = dataset.get_batch(batch_idx)
-            decoded_outputs, lengths, losses = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
-                                                  input_lengths=source_len, max_source_oov=max_source_oov, w2fs=w2fs)
+            decoded_outputs, lengths, losses = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb, w2fs=w2fs,
+                                                          input_lengths=source_len, max_source_oov=max_source_oov)
             eval_loss += sum(losses)/len(losses)
             for j in range(len(lengths)):
                 i += 1
