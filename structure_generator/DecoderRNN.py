@@ -409,7 +409,6 @@ class DecoderRNN(BaseRNN):
         out_vec = torch.cat((dec_hidden, enc_output_context_rd), 1)
         out_vec = self.V2(out_vec)
         p_vocab = F.softmax(out_vec, dim=1)
-        # p_vocab = F.softmax(self.V(torch.cat((dec_hidden, enc_output_context), 1)), dim=1)
         # print('p_vocab: {}'.format(p_vocab.size()))
 
         p_gen = torch.sigmoid(enc_context_proj + self.w_d(dec_hidden) + self.w_y(decoder_input)).view(-1, 1)
@@ -437,10 +436,11 @@ class DecoderRNN(BaseRNN):
         del weighted_Pvocab       # 'Recheck OOV indexes!'
 
         # scatter article word probs to combined vocab prob.
+        src_prob = combined_vocab.gather(1, input_ids)
         combined_vocab = combined_vocab.scatter_add(1, input_ids, weighted_attn)
         # print('combined_vocab: {}'.format(combined_vocab.size()))
 
-        return combined_vocab, attn_weights
+        return combined_vocab, attn_weights, (p_gen, src_prob)
 
     def forward(self, max_source_oov=0, targets=None, targets_id=None, input_ids=None,
                 enc_hidden=None, enc_input=None, enc_state=None, enc_mask=None, enc_field=None, enc_pos=None,
@@ -488,11 +488,11 @@ class DecoderRNN(BaseRNN):
                 dec_hidden = hidden[:, step, :]
                 decoder_input = decoder_inputs[:, step, :]
 
-                combined_vocab, attn_weights = self._decode_step(batch_size, input_ids, coverage, max_source_oov,
-                                                                dec_hidden, decoder_input,
-                                                                enc_mask, max_enc_len,
-                                                                enc_hidden_keys, enc_input_keys, enc_field_keys,
-                                                                enc_hidden_vals, enc_input_vals, enc_field_vals)
+                combined_vocab, attn_weights, _ = self._decode_step(batch_size, input_ids, coverage, max_source_oov,
+                                                                    dec_hidden, decoder_input,
+                                                                    enc_mask, max_enc_len,
+                                                                    enc_hidden_keys, enc_input_keys, enc_field_keys,
+                                                                    enc_hidden_vals, enc_input_vals, enc_field_vals)
                 # mask the output to account for PAD
                 target_mask_0 = target_id.ne(0).detach()
                 output = combined_vocab.gather(1, target_id).add_(sys.float_info.epsilon)
@@ -533,24 +533,22 @@ class DecoderRNN(BaseRNN):
         finished = np.array([False] * batch_size)
         losses = []
         decoded_outputs = []
+        src_probs = []
+        p_gens = []
         if fig:
             attn = []
         decoder_input = self.embedding(targets)
         # step through decoder hidden states
         for step in range(max_length):
             dec_hidden, _c = self.rnn(decoder_input, decoder_hidden_init)
-            combined_vocab, attn_weights = self._decode_step(batch_size, input_ids, coverage, max_source_oov,
+            combined_vocab, attn_weights, (p_gen, src_prob) = self._decode_step(batch_size, input_ids, coverage, max_source_oov,
                                                              dec_hidden.squeeze(1), decoder_input.squeeze(1),
                                                              enc_mask, max_enc_len,
                                                              enc_hidden_keys, enc_input_keys, enc_field_keys,
                                                              enc_hidden_vals, enc_input_vals, enc_field_vals)
 
             combined_vocab[:, self.unk_id] = 0  # NOTE: not allow decoder to output UNK
-
-            # greedy decoding: get word indices and probs
-            probs, symbols = combined_vocab.topk(1)
-            probs = probs.add_(sys.float_info.epsilon)
-
+            probs, symbols = combined_vocab.topk(1)  # greedy decoding: get word indices and probs
             if self.mask:
                 tmp_mask = torch.zeros_like(enc_mask, dtype=torch.uint8)
                 for i in range(symbols.size(0)):
@@ -562,21 +560,7 @@ class DecoderRNN(BaseRNN):
             if fig:
                 attn.append(attn_weights)
             decoded_outputs.append(symbols.clone())
-            eos_batch = symbols.data.ne(self.eos_id)
-
-            # record eval loss
-            target_mask_step = eos_batch.squeeze(1).detach()
-
-            logits = probs.log()
-            nll = logits.mul(-1)
-            batch_loss = nll * target_mask_step.float()
-
-            losses.append(batch_loss.mean().item())
-
-            # check if all samples finished at the eos token
-            finished_step = np.array(eos_batch.squeeze(1).tolist(), dtype=bool)
-            finished = np.logical_or(finished, finished_step)
-
+            eos_batch = symbols.data.eq(self.eos_id)
             if eos_batch.dim() > 0:
                 eos_batch = eos_batch.cpu().view(-1).numpy()
                 update_idx = ((lengths > step) & eos_batch) != 0
@@ -592,15 +576,31 @@ class DecoderRNN(BaseRNN):
             if self.use_cov_loss:
                 coverage = coverage + attn_weights
 
+            # record eval loss
+            target_mask_step = symbols.ne(self.eos_id).detach()
+            probs = probs.add_(sys.float_info.epsilon)
+            logits = probs.log()
+            nll = logits.mul(-1)
+            batch_loss = nll * target_mask_step.float()
+            losses.append(batch_loss.mean().item())
+
+            p_gens.append(p_gen)
+            src_probs.append(src_prob)
+
+            # check if all samples finished at the eos token
+            finished_step = np.logical_not(np.array(target_mask_step.view(-1), dtype=bool))
+            finished = np.logical_or(finished, finished_step)
             # stop if all finished
-            if all(finished):
-                break
+            if all(finished): break
+
+        p_gens = torch.stack(p_gens, 1).squeeze(2)
+
         if fig:
             self_matrix = f_matrix[0] if self.field_self_att else None
-            return torch.stack(decoded_outputs, 1).squeeze(2), lengths.tolist(), losses, self_matrix, \
+            return torch.stack(decoded_outputs, 1).squeeze(2), lengths.tolist(), losses, p_gens, self_matrix, \
                    torch.stack(attn, 1).squeeze(2)[0]
         else:
-            return torch.stack(decoded_outputs, 1).squeeze(2), lengths.tolist(), losses
+            return torch.stack(decoded_outputs, 1).squeeze(2), lengths.tolist(), losses, p_gens
 
     def _init_state(self, enc_state):
         """ Initialize the encoder hidden state. """

@@ -34,6 +34,7 @@ class Predictor(object):
         torch.set_grad_enabled(False)
         refs = {}
         cands = {}
+        cands_with_pgens = {}
         i = 0
         eval_loss = 0
         total_batches = len(dataset.corpus)
@@ -41,32 +42,44 @@ class Predictor(object):
         for batch_idx in tqdm(range(total_batches)):
             batch_s, batch_o_s, batch_f, batch_pf, batch_pb, sources, targets, fields, list_oovs, source_len, \
                 max_source_oov, w2fs = dataset.get_batch(batch_idx)
-            decoded_outputs, lengths, losses = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb, w2fs=w2fs,
-                                                          input_lengths=source_len, max_source_oov=max_source_oov)
+            decoded_outputs, lengths, losses, p_gens = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
+                                                                  w2fs=w2fs, input_lengths=source_len,
+                                                                  max_source_oov=max_source_oov)
             eval_loss += sum(losses)/len(losses)
             for j in range(len(lengths)):
                 i += 1
-                ref = self.post_process(targets[j])
+                ref, _ = self.post_process(targets[j])
                 refs[i] = [ref]
                 out_seq = []
                 for k in range(lengths[j]):
+                    # get tokens and replace OOVs
                     symbol = decoded_outputs[j][k].item()
                     if symbol < self.vocab.size:
                         out_seq.append(self.vocab.idx2word[symbol])
                     else:
                         out_seq.append(list_oovs[j][symbol-self.vocab.size])
-                out = self.post_process(out_seq)
+                out, out_with_gens = self.post_process(out_seq, p_gens[j])
                 cands[i] = out
+                cands_with_pgens[i] = out_with_gens
 
-        return cands, refs, eval_loss
+        return cands, refs, eval_loss, cands_with_pgens
 
-    def post_process(self, sentence):
+    def post_process(self, sentence, p_gens=None):
         try:
             eos = sentence.index('<EOS>')
             sentence = sentence[:eos]
+            if p_gens is not None:
+                p_gens = p_gens[:eos]
         except ValueError:
             pass
-        return ' '.join([x for x in sentence if x != '<PAD>' and x != '<EOS>' and x != '<SOS>'])
+
+        if p_gens is None:
+            return ' '.join([x for x in sentence if x != '<PAD>' and x != '<EOS>' and x != '<SOS>']), None
+        else:
+            token_pgens = [(x, y.item()) for x, y in zip(sentence, p_gens) if x != '<PAD>' and x != '<EOS>' and x != '<SOS>']
+            out_with_gens = ["%s_%.3f"%(x, y) for x, y in token_pgens]
+            out = [x for x, y in token_pgens]
+            return ' '.join(out), ' '.join(out_with_gens)
 
     def showAttention(self, input_words, output_words, attentions, name, type):
         # Set up figure with colorbar
