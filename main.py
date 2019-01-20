@@ -65,6 +65,9 @@ parser.add_argument('--field_concat_pos', action='store_true',
 parser.add_argument('--field_context', action='store_false',
                     help='whether pass context vector of field embeddings to output layer')
 
+parser.add_argument('--context_mlp', action='store_true',
+                    help='MLP layer on context vectors before output layer')
+
 parser.add_argument('--shuffle', action='store_false',
                     help='whether to shuffle the batches during each epoch')
 
@@ -252,7 +255,8 @@ if __name__ == "__main__":
                          attn_type=args.attn_type, attn_fuse=args.attn_fuse,
                          use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
                          field_self_att=args.field_self_att, field_concat_pos=args.field_concat_pos,
-                         field_context=args.field_context, mask=args.mask, use_cuda=args.cuda,
+                         field_context=args.field_context, context_mlp=args.context_mlp,
+                         mask=args.mask, use_cuda=args.cuda,
                          input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers)
     model = Seq2seq(encoder, decoder).to(device)
     optimizer = optim.Adam(model.parameters(), lr=config.lr)

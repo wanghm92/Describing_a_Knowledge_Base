@@ -14,7 +14,7 @@ class DecoderRNN(BaseRNN):
                  rnn_cell='gru', directions=2,
                  attn_src='emb', attn_type='concat', attn_fuse='sum', attn_level=2,
                  use_cov_loss=True, use_cov_attn=True, cov_in_pgen=False,
-                 field_self_att=False, field_concat_pos=False, field_context=False,
+                 field_self_att=False, field_concat_pos=False, field_context=False, context_mlp=False,
                  mask=False, use_cuda=True,
                  n_layers=1, input_dropout_p=0, dropout_p=0, max_len=100, lmbda=1.5):
         
@@ -33,6 +33,7 @@ class DecoderRNN(BaseRNN):
         self.field_self_att = field_self_att
         self.field_concat_pos = field_concat_pos
         self.field_context = field_context
+        self.context_mlp = context_mlp
         # TODO: input feeding
         self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
         self.output_size = vocab_size
@@ -92,7 +93,6 @@ class DecoderRNN(BaseRNN):
                 self.v_hidden = nn.Linear(hidden_size, 1)
                 self.Wd_hidden = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
 
-
         self.Wf = nn.Linear(field_input_size, hidden_size)
 
         if self.attn_level == 3:
@@ -127,9 +127,11 @@ class DecoderRNN(BaseRNN):
             output_layer_input_size += enc_input_size
 
         # print('output_layer_input_size: {}'.format(output_layer_input_size))
-        self.V1 = nn.Linear(output_layer_input_size, hidden_size)
-        self.V2 = nn.Linear(hidden_size*2, self.output_size)
-        # self.V = nn.Linear(output_layer_input_size, self.output_size)
+        if self.context_mlp:
+            self.V1 = nn.Linear(output_layer_input_size, hidden_size)
+            self.V2 = nn.Linear(hidden_size*2, self.output_size)
+        else:
+            self.V = nn.Linear(output_layer_input_size + hidden_size, self.output_size)
 
         # ----------------- parameters for p_gen ----------------- #
         self.w_r = nn.Linear(enc_input_size, 1)     # encoder hidden context
@@ -138,8 +140,6 @@ class DecoderRNN(BaseRNN):
         self.w_d = nn.Linear(hidden_size, 1)        # decoder hidden state
         self.w_y = nn.Linear(embed_size,  1)        # decoder input word embedding
 
-        if self.cov_in_pgen:
-            self.w_cov = nn.Linear(1, 1, bias=False)
 
     def _pos_self_attn(self, enc_pos, enc_hidden, enc_input, enc_field):
         """ compute the self-attentive encoder output and field encodings"""
@@ -408,10 +408,12 @@ class DecoderRNN(BaseRNN):
         # print('enc_output_context: {}'.format(enc_output_context.size()))
         # print('enc_context_proj: {}'.format(enc_context_proj.size()))
 
-        enc_output_context_rd = self.V1(enc_output_context)
-        out_vec = torch.cat((dec_hidden, enc_output_context_rd), 1)
-        out_vec = self.V2(out_vec)
-        # out_vec = self.V(torch.cat((dec_hidden, enc_output_context), 1))
+        if self.context_mlp:
+            enc_output_context_rd = self.V1(enc_output_context)
+            out_vec = torch.cat((dec_hidden, enc_output_context_rd), 1)
+            out_vec = self.V2(out_vec)
+        else:
+            out_vec = self.V(torch.cat((dec_hidden, enc_output_context), 1))
         p_vocab = F.softmax(out_vec, dim=1)
         # print('p_vocab: {}'.format(p_vocab.size()))
 
@@ -419,10 +421,7 @@ class DecoderRNN(BaseRNN):
             # print('coverage: {}'.format(coverage))
             cov_mean = coverage.mean(dim=-1, keepdim=True)
             # print('cov_mean: {}'.format(cov_mean))
-            # TODO: may not need w_cov
-            cov_for_pgen = self.w_cov(cov_mean)
-            # print('cov_for_pgen: {}'.format(cov_for_pgen))
-            enc_context_proj += cov_for_pgen
+            enc_context_proj += cov_mean
         p_gen = torch.sigmoid(enc_context_proj + self.w_d(dec_hidden) + self.w_y(decoder_input)).view(-1, 1)
         # print('p_gen: {}'.format(p_gen.size()))
 
@@ -558,11 +557,15 @@ class DecoderRNN(BaseRNN):
         # step through decoder hidden states
         for step in range(max_length):
             dec_hidden, _c = self.rnn(decoder_input, decoder_hidden_init)
-            combined_vocab, attn_weights, (p_gen, src_prob) = self._decode_step(batch_size, input_ids, coverage, max_source_oov,
-                                                             dec_hidden.squeeze(1), decoder_input.squeeze(1),
-                                                             enc_mask, max_enc_len,
-                                                             enc_hidden_keys, enc_input_keys, enc_field_keys,
-                                                             enc_hidden_vals, enc_input_vals, enc_field_vals)
+            combined_vocab, attn_weights, (p_gen, src_prob) = self._decode_step(batch_size, input_ids, coverage,
+                                                                                max_source_oov,
+                                                                                dec_hidden.squeeze(1),
+                                                                                decoder_input.squeeze(1),
+                                                                                enc_mask, max_enc_len,
+                                                                                enc_hidden_keys, enc_input_keys,
+                                                                                enc_field_keys,
+                                                                                enc_hidden_vals, enc_input_vals,
+                                                                                enc_field_vals)
 
             combined_vocab[:, self.unk_id] = 0  # NOTE: not allow decoder to output UNK
             probs, symbols = combined_vocab.topk(1)  # greedy decoding: get word indices and probs
