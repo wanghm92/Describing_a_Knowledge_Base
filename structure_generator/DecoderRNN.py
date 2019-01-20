@@ -171,7 +171,7 @@ class DecoderRNN(BaseRNN):
     def _get_enc_keys(self, enc_hidden, enc_input, enc_field, batch_size, max_enc_len):
 
         if self.attn_level == 3:
-            enc_hidden_flat = enc_hidden.contiguous().view(batch_size * max_enc_len, -1)
+            enc_hidden_flat = enc_hidden.view(batch_size * max_enc_len, -1)
             # print('enc_hidden_flat: {}'.format(enc_hidden_flat.size()))
             enc_hidden_keys = self.Wr(enc_hidden_flat).view(batch_size, max_enc_len, -1)
             # print('enc_hidden_keys: {}'.format(enc_hidden_keys.size()))
@@ -183,7 +183,7 @@ class DecoderRNN(BaseRNN):
 
         elif self.attn_level == 2:
             if self.attn_src == 'rnn':
-                enc_hidden_flat = enc_hidden.contiguous().view(batch_size * max_enc_len, -1)
+                enc_hidden_flat = enc_hidden.view(batch_size * max_enc_len, -1)
                 # print('enc_hidden_flat: {}'.format(enc_hidden_flat.size()))
                 enc_hidden_keys = self.Wr(enc_hidden_flat).view(batch_size, max_enc_len, -1)
                 # print('enc_hidden_keys: {}'.format(enc_hidden_keys.size()))
@@ -196,7 +196,7 @@ class DecoderRNN(BaseRNN):
                 # print('enc_input_keys: {}'.format(enc_input_keys.size()))
 
         else:
-            enc_hidden_flat = enc_hidden.contiguous().view(batch_size * max_enc_len, -1)
+            enc_hidden_flat = enc_hidden.view(batch_size * max_enc_len, -1)
             # print('enc_hidden_flat: {}'.format(enc_hidden_flat.size()))
             enc_hidden_keys = self.Wr(enc_hidden_flat).view(batch_size, max_enc_len, -1)
             # print('enc_hidden_keys: {}'.format(enc_hidden_keys.size()))

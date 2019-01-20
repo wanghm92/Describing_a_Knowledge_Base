@@ -28,10 +28,10 @@ class EncoderRNN(BaseRNN):
         embed_pb = self.pos_embedding(batch_pb)
         embed_pos = torch.cat((embed_pf, embed_pb), dim=2)
         embed_field_pos = torch.cat((embed_field, embed_pos), dim=2)
-        embed = torch.cat((embed_input, embed_field_pos), dim=2)
-        embed = self.input_dropout(embed)
+        embedded = torch.cat((embed_input, embed_field_pos), dim=2)
+        embedded = self.input_dropout(embedded)
         if self.variable_lengths:
-            embedded = nn.utils.rnn.pack_padded_sequence(embed, input_lengths, batch_first=True)
+            embedded = nn.utils.rnn.pack_padded_sequence(embedded, input_lengths, batch_first=True)
 
         enc_hidden, enc_state = self.rnn(embedded)
 
@@ -39,6 +39,7 @@ class EncoderRNN(BaseRNN):
             enc_outputs = None
         else:
             enc_outputs, _ = nn.utils.rnn.pad_packed_sequence(enc_hidden, batch_first=True)
+            enc_outputs = enc_outputs.contiguous()
 
         if self.field_concat_pos:
             return enc_outputs, embed_input, embed_field_pos, embed_pos, enc_state, enc_mask

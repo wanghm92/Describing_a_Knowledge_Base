@@ -9,7 +9,7 @@ from utils.loader import Table2text_seq
 from structure_generator.EncoderRNN import EncoderRNN
 from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq
-from configurations import Config, ConfigSmall
+from configurations import Config, ConfigSmall, ConfigTest
 from eval import Evaluate
 import random, os, pprint, logging
 from tensorboardX import SummaryWriter
@@ -99,8 +99,8 @@ if not os.path.exists(save_file_dir):
         os.mkdir(os.path.join(save_file_dir, "evaluations"))
 
 # -------------------------------- Hyperparams and Tensorboard ------------------------------------ #
-# config = ConfigTest()
-config = Config()
+config = ConfigTest()
+# config = Config()
 config.batch_size = args.batch
 
 summary_dir = os.path.join(save_file_dir, "summary")
@@ -154,6 +154,8 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
 
     for epoch in range(load_epoch + 1, n_epochs + load_epoch + 1):
         # --------------------------------------- train -------------------------------------------- #
+        L.info("Training Epoch - {}".format(epoch))
+
         model.train(True)
         torch.set_grad_enabled(True)
         epoch_loss = 0
