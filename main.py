@@ -4,8 +4,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from predictor import Predictor
-# from utils.loader import Table2text_seq
-from utils.loader_wikibio import Table2text_seq
+from utils.loader import Table2text_seq
+# from utils.loader_wikibio import Table2text_seq
 from structure_generator.EncoderRNN import EncoderRNN
 from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq
@@ -33,7 +33,7 @@ parser.add_argument('--save', type=str, default='params.pkl',
                     help='path to save the final model')
 parser.add_argument('--dataset', type=str, default='test', choices=['test', 'valid'],
                     help='type of dataset for prediction')
-parser.add_argument('--mode', type=int, default=0, choices=[0, 1, 2, 3, 4],
+parser.add_argument('--mode', type=int, default=0, choices=[0, 1, 2],
                     help='train(0)/resume(1)/evaluation(2)/predict_individual(3)')
 parser.add_argument('--type', type=int, default=0, choices=[0, 1],
                     help='person(0)/animal(1)')
@@ -55,6 +55,8 @@ parser.add_argument('--use_cov_attn', action='store_true',
                     help='whether use coverage attention')
 parser.add_argument('--use_cov_loss', action='store_true',
                     help='whether use coverage loss')
+parser.add_argument('--cov_in_pgen', action='store_true',
+                    help='whether use coverage in calculating p_gen')
 
 parser.add_argument('--field_self_att', action='store_true',
                     help='whether use field self-attention')
@@ -192,8 +194,14 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         # --------------------------------------- evaluation -------------------------------------------- #
         final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=epoch)
         rouge_l = final_scores['ROUGE_L']
+        bleu_1 = final_scores['Bleu_1']
+        bleu_2 = final_scores['Bleu_2']
+        bleu_3 = final_scores['Bleu_3']
         bleu_4 = final_scores['Bleu_4']
         writer.add_scalar('valid/ROUGE_L', rouge_l, epoch)
+        writer.add_scalar('valid/Bleu_1', bleu_1, epoch)
+        writer.add_scalar('valid/Bleu_2', bleu_2, epoch)
+        writer.add_scalar('valid/Bleu_3', bleu_3, epoch)
         writer.add_scalar('valid/Bleu_4', bleu_4, epoch)
 
         # ------------------------------------------ save ----------------------------------------------- #
@@ -212,8 +220,6 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         if len(suffix) > 0:
             L.info("model at epoch #{} saved".format(epoch))
             torch.save(model.state_dict(), "{}{}.{}".format(save_prefix, suffix, epoch))
-        else:
-            L.info("[*** {} ***] model at epoch #{} saved".format(suffix, epoch))
 
         # epoch_score = 2*rouge_l*bleu_4/(rouge_l + bleu_4)
 
@@ -244,7 +250,7 @@ if __name__ == "__main__":
                          rnn_cell=config.cell, directions=config.directions,
                          attn_src=args.attn_src, attn_level=args.attn_level,
                          attn_type=args.attn_type, attn_fuse=args.attn_fuse,
-                         use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss,
+                         use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
                          field_self_att=args.field_self_att, field_concat_pos=args.field_concat_pos,
                          field_context=args.field_context, mask=args.mask, use_cuda=args.cuda,
                          input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers)

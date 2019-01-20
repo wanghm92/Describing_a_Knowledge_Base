@@ -13,7 +13,7 @@ class DecoderRNN(BaseRNN):
     def __init__(self, vocab_size, embedding, embed_size, pemsize, sos_id, eos_id, unk_id, 
                  rnn_cell='gru', directions=2,
                  attn_src='emb', attn_type='concat', attn_fuse='sum', attn_level=2,
-                 use_cov_loss=True, use_cov_attn=True,
+                 use_cov_loss=True, use_cov_attn=True, cov_in_pgen=False,
                  field_self_att=False, field_concat_pos=False, field_context=False,
                  mask=False, use_cuda=True,
                  n_layers=1, input_dropout_p=0, dropout_p=0, max_len=100, lmbda=1.5):
@@ -29,6 +29,7 @@ class DecoderRNN(BaseRNN):
         self.directions = directions
         self.use_cov_loss = use_cov_loss
         self.use_cov_attn = use_cov_attn
+        self.cov_in_pgen = cov_in_pgen
         self.field_self_att = field_self_att
         self.field_concat_pos = field_concat_pos
         self.field_context = field_context
@@ -106,7 +107,7 @@ class DecoderRNN(BaseRNN):
             # NOTE: assume to use encoder rnn hidden states when attn_level == 1
             self.Wr = nn.Linear(enc_input_size, hidden_size)
 
-        if self.use_cov_loss:
+        if self.use_cov_attn:
             self.Wc = nn.Linear(1, hidden_size)  # e_t: coverage vector
 
         # ----------------- params for output ----------------- #
@@ -137,6 +138,8 @@ class DecoderRNN(BaseRNN):
         self.w_d = nn.Linear(hidden_size, 1)        # decoder hidden state
         self.w_y = nn.Linear(embed_size,  1)        # decoder input word embedding
 
+        if self.cov_in_pgen:
+            self.w_cov = nn.Linear(1, 1, bias=False)
 
     def _pos_self_attn(self, enc_pos, enc_hidden, enc_input, enc_field):
         """ compute the self-attentive encoder output and field encodings"""
@@ -398,7 +401,7 @@ class DecoderRNN(BaseRNN):
                      ):
         # print('input_ids: {}'.format(input_ids.size()))
 
-        attn_scores = self._get_attn_scores(batch_size, max_enc_len, coverage, enc_mask, dec_hidden, 
+        attn_scores = self._get_attn_scores(batch_size, max_enc_len, coverage, enc_mask, dec_hidden,
                                             enc_hidden_keys, enc_input_keys, enc_field_keys, self.attn_type)
 
         enc_output_context, enc_context_proj = self._get_contexts(attn_scores, enc_hidden_vals, enc_input_vals, enc_field_vals)
@@ -412,6 +415,14 @@ class DecoderRNN(BaseRNN):
         p_vocab = F.softmax(out_vec, dim=1)
         # print('p_vocab: {}'.format(p_vocab.size()))
 
+        if self.cov_in_pgen:
+            # print('coverage: {}'.format(coverage))
+            cov_mean = coverage.mean(dim=-1, keepdim=True)
+            # print('cov_mean: {}'.format(cov_mean))
+            # TODO: may not need w_cov
+            cov_for_pgen = self.w_cov(cov_mean)
+            # print('cov_for_pgen: {}'.format(cov_for_pgen))
+            enc_context_proj += cov_for_pgen
         p_gen = torch.sigmoid(enc_context_proj + self.w_d(dec_hidden) + self.w_y(decoder_input)).view(-1, 1)
         # print('p_gen: {}'.format(p_gen.size()))
 
@@ -452,12 +463,15 @@ class DecoderRNN(BaseRNN):
 
         targets, batch_size, max_length, max_enc_len = self._validate_args(targets, enc_state, enc_input, teacher_forcing_ratio)
         decoder_hidden_init = self._init_state(enc_state)
-        if self.use_cov_loss:
+        if self.use_cov_loss or self.use_cov_attn:
             coverage = torch.zeros(batch_size, max_enc_len)
+            # coverage_norm = torch.zeros(batch_size, max_enc_len)
             if self.use_cuda:
                 coverage = coverage.cuda()
+                # coverage_norm = coverage_norm.cuda()
         else:
             coverage = None
+            # coverage_norm = None
 
         enc_hidden_keys, enc_input_keys, enc_field_keys = \
             self._get_enc_keys(enc_hidden, enc_input, enc_field, batch_size, max_enc_len)
@@ -504,9 +518,11 @@ class DecoderRNN(BaseRNN):
 
                 if self.use_cov_loss:
                     coverage = coverage + attn_weights
+                    # coverage_norm = coverage/(step + 1)
                     # print('coverage: {}'.format(coverage.size()))
                     # take minimum across both attn_weights and coverage
                     _cov_loss, _ = torch.stack((coverage, attn_weights), 2).min(2)
+                    # _cov_loss, _ = torch.stack((coverage_norm, attn_weights), 2).min(2)
                     # print('_cov_loss: {}'.format(_cov_loss.size()))
                     cov_loss.append(_cov_loss.sum(1))
 
