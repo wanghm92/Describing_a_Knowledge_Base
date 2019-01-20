@@ -402,12 +402,13 @@ class DecoderRNN(BaseRNN):
                                             enc_hidden_keys, enc_input_keys, enc_field_keys, self.attn_type)
 
         enc_output_context, enc_context_proj = self._get_contexts(attn_scores, enc_hidden_vals, enc_input_vals, enc_field_vals)
-
         # print('enc_output_context: {}'.format(enc_output_context.size()))
         # print('enc_context_proj: {}'.format(enc_context_proj.size()))
+
         enc_output_context_rd = self.V1(enc_output_context)
         out_vec = torch.cat((dec_hidden, enc_output_context_rd), 1)
         out_vec = self.V2(out_vec)
+        # out_vec = self.V(torch.cat((dec_hidden, enc_output_context), 1))
         p_vocab = F.softmax(out_vec, dim=1)
         # print('p_vocab: {}'.format(p_vocab.size()))
 

@@ -170,13 +170,16 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         # --------------------------------------- inference -------------------------------------------- #
         predictor = Predictor(model, v_dataset.vocab, args.cuda)
         L.info("Start Evaluating ...")
-        cand, ref, eval_loss, cands_with_pgens = predictor.preeval_batch(v_dataset)
+        cand, ref, eval_loss, others = predictor.preeval_batch(v_dataset)
+        cands_with_pgens, srcs, fds = others
         writer.add_scalar('valid/loss', eval_loss, epoch)
         L.info('Result:')
         L.info('eval_loss: {}'.format(eval_loss))
-        L.info('ref[1]: {}'.format(ref[1][0]))
-        L.info('cand[1]: {}'.format(cand[1]))
-        L.info('cands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
+        L.info('\nref[1]: {}'.format(ref[1][0]))
+        L.info('\ncand[1]: {}'.format(cand[1]))
+        L.info('\nsource[1]: {}'.format(srcs[1]))
+        L.info('\nfield[1]: {}'.format(fds[1]))
+        L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
         eval_file_out = "{}/evaluations/valid.epoch_{}.cand.live.txt".format(save_file_dir, epoch)
         with open(eval_file_out, 'w+') as fout:
             for c in range(len(cand)):
@@ -289,12 +292,15 @@ if __name__ == "__main__":
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
-        cand, ref, eval_loss, cands_with_pgens = predictor.preeval_batch
+        cand, ref, eval_loss, others = predictor.preeval_batch
+        cands_with_pgens, srcs, fds = others
         L.info('Result:')
         L.info('eval_loss: {}'.format(eval_loss))
-        L.info('ref[1]: {}'.format(ref[1][0]))
-        L.info('cand[1]: {}'.format(cand[1]))
-        L.info('cands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
+        L.info('\nref[1]: {}'.format(ref[1][0]))
+        L.info('\ncand[1]: {}'.format(cand[1]))
+        L.info('\nsource[1]: {}'.format(srcs[1]))
+        L.info('\nfield[1]: {}'.format(fds[1]))
+        L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
 
     # ----------------------------------- evaluation ---------------------------------------- #
     elif args.mode == 2:
@@ -308,13 +314,15 @@ if __name__ == "__main__":
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
-        cand, ref, eval_loss, cands_with_pgens = predictor.preeval_batch(dataset)
-
+        cand, ref, eval_loss, others = predictor.preeval_batch(dataset)
+        cands_with_pgens, srcs, fds = others
         L.info('Result:')
         L.info('eval_loss: {}'.format(eval_loss))
-        L.info('ref[1]: {}'.format(ref[1][0]))
-        L.info('cand[1]: {}'.format(cand[1]))
-        L.info('cands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
+        L.info('\nref[1]: {}'.format(ref[1][0]))
+        L.info('\ncand[1]: {}'.format(cand[1]))
+        L.info('\nsource[1]: {}'.format(srcs[1]))
+        L.info('\nfield[1]: {}'.format(fds[1]))
+        L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
 
         cand_file_out = "{}/evaluations/{}.epoch_{}.cand.txt".format(save_file_dir, args.dataset, load_epoch)
         with open(cand_file_out, 'w+') as fout:
@@ -326,10 +334,20 @@ if __name__ == "__main__":
             for c in range(len(cands_with_pgens)):
                 fout.write("{}\n".format(cands_with_pgens[c+1]))
 
-        ref_file_out = "{}/evaluations/{}.ref.txt".format(save_file_dir, args.dataset)
+        ref_file_out = "{}/evaluations/{}.ref.sum.txt".format(save_file_dir, args.dataset)
         with open(ref_file_out, 'w+') as fout:
             for r in range(len(ref)):
                 fout.write("{}\n".format(ref[r+1][0]))
+
+        src_file_out = "{}/evaluations/{}.ref.tbv.txt".format(save_file_dir, args.dataset)
+        with open(src_file_out, 'w+') as fout:
+            for s in range(len(srcs)):
+                fout.write("{}\n".format(srcs[s+1]))
+
+        fd_file_out = "{}/evaluations/{}.ref.tbl.txt".format(save_file_dir, args.dataset)
+        with open(fd_file_out, 'w+') as fout:
+            for f in range(len(fds)):
+                fout.write("{}\n".format(fds[f+1]))
 
         eval_f = Evaluate()
         final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=load_epoch)

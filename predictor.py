@@ -35,6 +35,8 @@ class Predictor(object):
         refs = {}
         cands = {}
         cands_with_pgens = {}
+        srcs = {}
+        fds = {}
         i = 0
         eval_loss = 0
         total_batches = len(dataset.corpus)
@@ -48,8 +50,9 @@ class Predictor(object):
             eval_loss += sum(losses)/len(losses)
             for j in range(len(lengths)):
                 i += 1
-                ref, _ = self.post_process(targets[j])
-                refs[i] = [ref]
+                srcs[i] = ' '.join(['_'.join(x.split()) for x in sources[j]])
+                fds[i] = ' '.join(fields[j])
+                refs[i] = [' '.join(targets[j])]
                 out_seq = []
                 for k in range(lengths[j]):
                     # get tokens and replace OOVs
@@ -62,7 +65,7 @@ class Predictor(object):
                 cands[i] = out
                 cands_with_pgens[i] = out_with_gens
 
-        return cands, refs, eval_loss, cands_with_pgens
+        return cands, refs, eval_loss, (cands_with_pgens, srcs, fds)
 
     def post_process(self, sentence, p_gens=None):
         try:
@@ -77,9 +80,13 @@ class Predictor(object):
             return ' '.join([x for x in sentence if x != '<PAD>' and x != '<EOS>' and x != '<SOS>']), None
         else:
             token_pgens = [(x, y.item()) for x, y in zip(sentence, p_gens) if x != '<PAD>' and x != '<EOS>' and x != '<SOS>']
-            out_with_gens = ["%s_%.3f"%(x, y) for x, y in token_pgens]
-            out = [x for x, y in token_pgens]
-            return ' '.join(out), ' '.join(out_with_gens)
+            if len(token_pgens) > 0:
+                out, pgens_filtered = zip(*token_pgens)
+                pgens_filtered = ["_%.3f"%x if x < 0.7 else '' for x in pgens_filtered]
+                out_with_gens = ["{}{}".format('_'.join(x.split()), y) for x, y in zip(out, pgens_filtered)]
+                return ' '.join(out), ' '.join(out_with_gens)
+            else:
+                return '', ''
 
     def showAttention(self, input_words, output_words, attentions, name, type):
         # Set up figure with colorbar
