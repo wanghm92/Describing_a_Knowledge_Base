@@ -114,7 +114,6 @@ class Table2text_seq:
         prefix = "{}/table2text_nlg/data/dkb/".format(HOME)
         self.type = type
         self.vocab = None
-        # self.target_vocab = None
         self.text_len = 0
         self.max_p = 0
         self.data_src = data_src
