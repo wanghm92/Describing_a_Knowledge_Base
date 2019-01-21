@@ -17,6 +17,7 @@ class Vocabulary:
             self.start_end_tokens = False
             self.size = len(word2idx)
             self.field_vocab_size = len(field2idx)
+            self.field_vocab_size += 2  # TODO: remove this legacy
         else:
             self.word2idx = dict()
             self.idx2word = dict()
@@ -38,6 +39,8 @@ class Vocabulary:
             print("Finish build vocabulary")
             self._build_word_index()
             print("Finish build word dictionary")
+            self.size = len(word2idx)
+            self.field_vocab_size = len(field2idx)
 
     def _build_vocabulary(self, corpus, field):
         vocabulary = Counter(word for sent in corpus for word in sent)
@@ -53,17 +56,8 @@ class Vocabulary:
                            if freq >= self.min_frequency_field}
 
         self.vocabulary = Counter(vocabulary)
-        # self.vocabulary.update(field_vocab)
-        self.size = len(self.vocabulary) + 2  # padding and unk tokens
-        if self.start_end_tokens:
-            self.size += 2
-
         self.field_vocab = Counter(field_vocab)
-        self.field_vocab_size = len(self.field_vocab) + 2  # padding and unk tokens
-        if self.start_end_tokens:
-            self.field_vocab_size += 2
-
-        print(self.field_vocab)
+        # print(self.field_vocab)
 
 
     def _build_word_index(self):
@@ -186,7 +180,8 @@ class Table2text_seq:
         print("loading vocab ... from {}".format(vocab_path_pkl))
         with open(vocab_path_pkl, 'rb') as fin:
             data = pickle.load(fin)
-        self.vocab = Vocabulary(word2idx=data["word2idx"], idx2word=data["idx2word"])
+        self.vocab = Vocabulary(word2idx=data["word2idx"], idx2word=data["idx2word"],
+                                field2idx=data["field2idx"], idx2field=data["idx2field"])
 
         print("Loading data $LIGHT$ from {}".format(path))
         # (qkey, qitem, index)

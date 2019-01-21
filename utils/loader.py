@@ -17,7 +17,6 @@ class Vocabulary:
         else:
             self.word2idx = dict()
             self.idx2word = dict()
-            self.size = 0
             self.vocabulary = None
             # most common words
             self.max_words = max_words
@@ -28,6 +27,7 @@ class Vocabulary:
             print("Finish build vocabulary")
             self._build_word_index()
             print("Finish build word dictionary")
+            self.size = len(word2idx)
 
     def _build_vocabulary(self, corpus, field):
         vocabulary = Counter(word for sent in corpus for word in sent)
@@ -41,9 +41,9 @@ class Vocabulary:
                           if freq >= self.min_frequency}
         self.vocabulary = Counter(vocabulary)
         self.vocabulary.update(field_vocab)
-        self.size = len(self.vocabulary) + 2  # padding and unk tokens
-        if self.start_end_tokens:
-            self.size += 2
+        # self.size = len(self.vocabulary) + 2  # padding and unk tokens
+        # if self.start_end_tokens:
+        #     self.size += 2
 
     def _build_word_index(self):
         self.word2idx['<PAD>'] = 0

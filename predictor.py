@@ -65,7 +65,7 @@ class Predictor(object):
                 cands[i] = out
                 cands_with_pgens[i] = out_with_gens
 
-        return cands, refs, eval_loss, (cands_with_pgens, srcs, fds)
+        return cands, refs, eval_loss/total_batches, (cands_with_pgens, srcs, fds)
 
     def post_process(self, sentence, p_gens=None):
         try:
