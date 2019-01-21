@@ -4,12 +4,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from predictor import Predictor
-from utils.loader import Table2text_seq
-from utils.loader_wikibio import Table2text_seq
-# from structure_generator.EncoderRNN import EncoderRNN
+from structure_generator.EncoderRNN import EncoderRNN
 from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq
-from configurations import Config, ConfigSmall, ConfigTest
+from configurations import Config, ConfigSmall, ConfigTest, ConfigWikibio
 from eval import Evaluate
 import random, os, pprint, logging
 from tensorboardX import SummaryWriter
@@ -35,8 +33,8 @@ parser.add_argument('--dataset', type=str, default='test', choices=['test', 'val
                     help='type of dataset for prediction')
 parser.add_argument('--mode', type=int, default=0, choices=[0, 1, 2],
                     help='train(0)/resume(1)/evaluation(2)/predict_individual(3)')
-parser.add_argument('--type', type=int, default=0, choices=[0, 1],
-                    help='person(0)/animal(1)')
+parser.add_argument('--type', type=int, default=0, choices=[0, 1, 2],
+                    help='person(0)/animal(1)/wikibio(2)')
 parser.add_argument('--mask', action='store_true',
                     help='false(0)/true(1)')
 parser.add_argument('--batch', type=int, default='64',
@@ -99,8 +97,17 @@ if not os.path.exists(save_file_dir):
         os.mkdir(os.path.join(save_file_dir, "evaluations"))
 
 # -------------------------------- Hyperparams and Tensorboard ------------------------------------ #
+if args.type == 2:
+    config = ConfigWikibio()
+    from utils.loader_wikibio import Table2text_seq
+else:
+    config = Config()
+    from utils.loader import Table2text_seq
+
+print("config is: {}".format(config))
+
 # config = ConfigTest()
-config = Config()
+
 config.batch_size = args.batch
 
 summary_dir = os.path.join(save_file_dir, "summary")
@@ -245,21 +252,36 @@ if __name__ == "__main__":
     # -------------------------------------------------------------------------------------------------- #
     L.info("Building Model ...")
     embedding = nn.Embedding(t_dataset.vocab.size, config.emsize, padding_idx=0)
-    encoder = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, hidden_size=config.emsize,
-                         pos_size=t_dataset.max_p, pemsize=config.pemsize, attn_src=args.attn_src,
+    if args.type == 2:
+        assert hasattr(t_dataset.vocab, 'field_size')
+        field_embedding = nn.Embedding(t_dataset.vocab.field_vocab_size, config.fdsize, padding_idx=0)
+        hidden_size = config.hdsize
+        fd_size = config.fdsize
+    else:
+        field_embedding = None
+        hidden_size = config.emsize
+        fd_size = config.emsize
+
+    encoder = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding,
+                         embed_size=config.emsize, fdsize=fd_size,
+                         hidden_size=hidden_size, pos_size=t_dataset.max_p, pemsize=config.pemsize,
+                         attn_src=args.attn_src,
                          input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers,
                          rnn_cell=config.cell, directions=config.directions,
-                         variable_lengths=True, field_concat_pos=args.field_concat_pos)
-    decoder = DecoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding, embed_size=config.emsize,
-                         pemsize=config.pemsize, sos_id=3, eos_id=2, unk_id=1,
+                         variable_lengths=True, field_concat_pos=args.field_concat_pos,
+                         field_embedding=field_embedding)
+    decoder = DecoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding,
+                         embed_size=config.emsize, hidden_size=hidden_size, fdsize=fd_size, pemsize=config.pemsize,
+                         sos_id=3, eos_id=2, unk_id=1,
                          rnn_cell=config.cell, directions=config.directions,
                          attn_src=args.attn_src, attn_level=args.attn_level,
                          attn_type=args.attn_type, attn_fuse=args.attn_fuse,
                          use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
                          field_self_att=args.field_self_att, field_concat_pos=args.field_concat_pos,
                          field_context=args.field_context, context_mlp=args.context_mlp,
-                         mask=args.mask, use_cuda=args.cuda,
+                         mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen,
                          input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers)
+
     model = Seq2seq(encoder, decoder).to(device)
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
 
