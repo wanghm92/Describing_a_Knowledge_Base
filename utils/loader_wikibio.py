@@ -7,18 +7,27 @@ from tqdm import tqdm
 
 class Vocabulary:
     """Vocabulary class for mapping between words and ids"""
-    def __init__(self, word2idx=None, idx2word=None, field=None, corpus=None, max_words=20000, min_frequency=5,
-                 start_end_tokens=True, min_frequency_field=100):
+    def __init__(self, word2idx=None, idx2word=None, field2idx=None, idx2field=None, field=None, corpus=None,
+                 max_words=20000, min_frequency=5, start_end_tokens=True, min_frequency_field=100):
         if corpus is None:
             self.word2idx = word2idx
             self.idx2word = idx2word
+            self.field2idx = field2idx
+            self.idx2field = idx2field
             self.start_end_tokens = False
             self.size = len(word2idx)
+            self.field_vocab_size = len(field2idx)
         else:
             self.word2idx = dict()
             self.idx2word = dict()
             self.size = 0
             self.vocabulary = None
+
+            self.field2idx = dict()
+            self.idx2field = dict()
+            self.field_vocab_size = 0
+            self.field_vocab = None
+
             # most common words
             self.max_words = max_words
             # least common words
@@ -42,27 +51,41 @@ class Vocabulary:
         if self.min_frequency_field:
             field_vocab = {word: freq for word, freq in field_vocab.items()
                            if freq >= self.min_frequency_field}
-        # print(field_vocab)
 
         self.vocabulary = Counter(vocabulary)
-        self.vocabulary.update(field_vocab)
-        self.size = len(self.vocabulary) + 3  # padding and unk tokens
+        # self.vocabulary.update(field_vocab)
+        self.size = len(self.vocabulary) + 2  # padding and unk tokens
         if self.start_end_tokens:
             self.size += 2
+
+        self.field_vocab = Counter(field_vocab)
+        self.field_vocab_size = len(self.field_vocab) + 2  # padding and unk tokens
+        if self.start_end_tokens:
+            self.field_vocab_size += 2
+
+        print(self.field_vocab)
+
 
     def _build_word_index(self):
         self.word2idx['<PAD>'] = 0
         self.word2idx['<UNK>'] = 1
-        self.word2idx['<UNK_FIELD>'] = 2
 
         if self.start_end_tokens:
-            self.word2idx['<EOS>'] = 3
-            self.word2idx['<SOS>'] = 4
+            self.word2idx['<EOS>'] = 2
+            self.word2idx['<SOS>'] = 3
 
         offset = len(self.word2idx)
         for idx, word in enumerate(self.vocabulary):
             self.word2idx[word] = idx + offset
         self.idx2word = {idx: word for word, idx in self.word2idx.items()}
+
+        self.field2idx['<PAD>'] = 0
+        self.field2idx['<UNK>'] = 1
+
+        offset = len(self.field2idx)
+        for idx, fd in enumerate(self.field_vocab):
+            self.field2idx[fd] = idx + offset
+        self.idx2field = {idx: fd for fd, idx in self.field2idx.items()}
 
     def add_start_end(self, vector):
         vector.append(self.word2idx['<EOS>'])
@@ -70,8 +93,8 @@ class Vocabulary:
 
     def vectorize_field(self, vector):
         _o_field = []
-        for word in vector:
-            _o_field.append(self.word2idx.get(word, self.word2idx['<UNK_FIELD>']))
+        for fd in vector:
+            _o_field.append(self.field2idx.get(fd, self.field2idx['<UNK>']))
         return _o_field
 
     def vectorize_source(self, vector, table):
@@ -92,7 +115,8 @@ class Vocabulary:
                 else:
                     _o_source.append(source_oov[word] + self.size)
                 # NOTE: use field type embedding for OOV field values
-                _source.append(self.word2idx.get(table[word], self.word2idx['<UNK_FIELD>']))
+                # _source.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
+                _source.append(self.word2idx['<UNK>'])
         return _o_source, source_oov, _source, oov_freq
 
     def vectorize_target(self, vector, source_oov, table):
@@ -112,16 +136,16 @@ class Vocabulary:
                 else:
                     # NOTE: use source_oov idx for OOV text words but appear in source OOVs
                     _o_target.append(source_oov[word] + self.size)
-                    _target.append(self.word2idx.get(table[word], self.word2idx['<UNK_FIELD>']))
+                    # _target.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
+                    _target.append(self.word2idx['<UNK>'])
         return self.add_start_end(_o_target), self.add_start_end(_target), oov_freq
 
 
 class Table2text_seq:
     def __init__(self, data_src, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available(), train_mode=0):
         prefix = "{}/table2text_nlg/data/dkb/wikibio_dataset/".format(HOME)
-        self.type = type
+        assert type == 2
         self.vocab = None
-        # self.target_vocab = None
         self.text_len = 0
         self.max_p = 0
         self.data_src = data_src
@@ -136,20 +160,11 @@ class Table2text_seq:
 
         # ----------------------- file names ------------------------- #
         if data_src == 'train':
-            if self.type == 0:
-                path = "{}train_P.pkl".format(prefix)
-            else:
-                path = "{}train_A.pkl".format(prefix)
+            path = "{}train_P.pkl".format(prefix)
         elif data_src == 'valid':
-            if self.type == 0:
-                path = "{}valid_P.pkl".format(prefix)
-            else:
-                path = "{}valid_A.pkl".format(prefix)
+            path = "{}valid_P.pkl".format(prefix)
         elif data_src == 'test':
-            if self.type == 0:
-                path = "{}test_P.pkl".format(prefix)
-            else:
-                path = "{}test_A.pkl".format(prefix)
+            path = "{}test_P.pkl".format(prefix)
         else:
             raise ValueError("Only train, valid, test data_srcs are supported")
 
@@ -167,10 +182,7 @@ class Table2text_seq:
     def load_data_light(self, path):
         print("Loading data $LIGHT$ from {}".format(path))
         prefix = "{}/table2text_nlg/describe_kb/outputs".format(HOME)
-        if self.type == 0:
-            vocab_path_pkl = "{}/wikibio_vocab.pkl".format(prefix)
-        else:
-            vocab_path_pkl = "{}/wikibio_vocab_D.pkl".format(prefix)
+        vocab_path_pkl = "{}/wikibio_vocab.pkl".format(prefix)
         print("loading vocab ... from {}".format(vocab_path_pkl))
         with open(vocab_path_pkl, 'rb') as fin:
             data = pickle.load(fin)
@@ -241,21 +253,16 @@ class Table2text_seq:
         print("sorting samples ...")
         samples.sort(key=lambda x: len(x[0]), reverse=True)
 
-        if self.type == 0:
-            vocab_path_pkl = "{}/wikibio_vocab.pkl".format(prefix)
-            vocab_path_js = "{}/wikibio_vocab.json".format(prefix)
-        else:
-            vocab_path_pkl = "{}/wikibio_vocab_D.pkl".format(prefix)
-            vocab_path_js = "{}/wikibio_vocab_D.json".format(prefix)
+        vocab_path_pkl = "{}/wikibio_vocab.pkl".format(prefix)
+        vocab_path_js = "{}/wikibio_vocab.json".format(prefix)
         if self.data_src == 'train':
             print("saving vocab ...")
-            if self.type == 0:
-                self.vocab = Vocabulary(corpus=total, field=total_field)
-            else:
-                self.vocab = Vocabulary(corpus=total, field=total_field, min_frequency=0)
+            self.vocab = Vocabulary(corpus=total, field=total_field)
             data = {
                 "idx2word": self.vocab.idx2word,
-                "word2idx": self.vocab.word2idx
+                "word2idx": self.vocab.word2idx,
+                "idx2field": self.vocab.idx2field,
+                "field2idx": self.vocab.field2idx,
             }
             with open(vocab_path_pkl, 'wb') as fout:
                 pickle.dump(data, fout)
@@ -265,7 +272,8 @@ class Table2text_seq:
             print("loading vocab ...")
             with open(vocab_path_pkl, 'rb') as fin:
                 data = pickle.load(fin)
-            self.vocab = Vocabulary(word2idx=data["word2idx"], idx2word=data["idx2word"])
+            self.vocab = Vocabulary(word2idx=data["word2idx"], idx2word=data["idx2word"],
+                                    field2idx=data["field2idx"], idx2field=data["idx2field"])
         return samples
 
     def batchfy(self):
@@ -332,8 +340,7 @@ class Table2text_seq:
                 max_source_oov = len(source_oov)
             if self.data_src != 'train':
                 idx2word_oov = {idx: word for word, idx in source_oov}
-                w2f = {(idx+self.vocab.size): self.vocab.word2idx.get(table[word], self.vocab.word2idx['<UNK_FIELD>'])
-                       for word, idx in source_oov}
+                w2f = {(idx+self.vocab.size): self.vocab.word2idx['<UNK>'] for word, idx in source_oov}
                 w2fs.append(w2f)
                 list_oovs.append(idx2word_oov)
                 targets.append(target)  # tokens
