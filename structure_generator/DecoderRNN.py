@@ -179,50 +179,38 @@ class DecoderRNN(BaseRNN):
 
         if self.attn_level == 3:
             enc_hidden_flat = enc_hidden.view(batch_size * max_enc_len, -1)
-            # print('enc_hidden_flat: {}'.format(enc_hidden_flat.size()))
             enc_hidden_keys = self.Wr(enc_hidden_flat).view(batch_size, max_enc_len, -1)
-            # print('enc_hidden_keys: {}'.format(enc_hidden_keys.size()))
 
             enc_input_flat = enc_input.view(batch_size * max_enc_len, -1)
-            # print('enc_input_flat: {}'.format(enc_input_flat.size()))
             enc_input_keys = self.We(enc_input_flat).view(batch_size, max_enc_len, -1)
-            # print('enc_input_keys: {}'.format(enc_input_keys.size()))
 
         elif self.attn_level == 2:
             if self.attn_src == 'rnn':
                 enc_hidden_flat = enc_hidden.view(batch_size * max_enc_len, -1)
-                # print('enc_hidden_flat: {}'.format(enc_hidden_flat.size()))
                 enc_hidden_keys = self.Wr(enc_hidden_flat).view(batch_size, max_enc_len, -1)
-                # print('enc_hidden_keys: {}'.format(enc_hidden_keys.size()))
                 enc_input_keys = None
             elif self.attn_src == 'emb':
                 enc_hidden_keys = None
                 enc_input_flat = enc_input.view(batch_size * max_enc_len, -1)
-                # print('enc_input_flat: {}'.format(enc_input_flat.size()))
                 enc_input_keys = self.We(enc_input_flat).view(batch_size, max_enc_len, -1)
-                # print('enc_input_keys: {}'.format(enc_input_keys.size()))
 
         else:
             enc_hidden_flat = enc_hidden.view(batch_size * max_enc_len, -1)
-            # print('enc_hidden_flat: {}'.format(enc_hidden_flat.size()))
             enc_hidden_keys = self.Wr(enc_hidden_flat).view(batch_size, max_enc_len, -1)
-            # print('enc_hidden_keys: {}'.format(enc_hidden_keys.size()))
             enc_input_keys = None
 
         if self.attn_level > 1:
             enc_field_flat = enc_field.view(batch_size * max_enc_len, -1)
-            # print('enc_field_flat: {}'.format(enc_field_flat.size()))
             enc_field_keys = self.Wf(enc_field_flat).view(batch_size, max_enc_len, -1)
-            # print('enc_field_keys: {}'.format(enc_field_keys.size()))
         else:
             enc_field_keys = None
 
         return enc_hidden_keys, enc_input_keys, enc_field_keys
 
-    def _softmax(self, t, mask):
+    def _softmax(self, et, mask):
         """ apply mask to logits and compute softmax"""
-        t.masked_fill_(mask.data.byte(), -np.inf)  # mask to -inf before applying softmax
-        score = F.softmax(t, dim=1)
+        et.masked_fill_(mask.data.byte(), -np.inf)  # mask to -inf before applying softmax
+        score = F.softmax(et, dim=1)  # along direction of sequence length
         return score
 
     def _attn_score_concat(self, batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask):
@@ -268,10 +256,8 @@ class DecoderRNN(BaseRNN):
                 enc_keys = enc_hidden_keys + enc_field_keys
         else:
             enc_keys = enc_hidden_keys
-        # print('enc_keys: {}'.format(enc_keys.size()))
 
         score = self._attn_score(batch_size, max_enc_len, self.v, dec_query, enc_keys, cov_vector, enc_mask)
-        # print('score: {}'.format(score.size()))
 
         return score, score, score
 
@@ -350,7 +336,6 @@ class DecoderRNN(BaseRNN):
             cov_vector = self.Wc(coverage.view(-1, 1)).view(batch_size, max_enc_len, -1)
         else:
             cov_vector = None
-        # print('cov_vector: {}'.format(cov_vector.size()))
 
         if self.attn_fuse == 'concat':
             return self._get_attn_score_fuse_concat(batch_size, max_enc_len, cov_vector, enc_mask,
@@ -386,10 +371,10 @@ class DecoderRNN(BaseRNN):
                 # p_gen
                 enc_context_proj = self.w_r(enc_output_context)
 
+            enc_field_context = attn_scores[2].unsqueeze(1).bmm(enc_field_vals).squeeze(1)
+            enc_context_proj += self.w_f(enc_field_context)
             if self.field_context:
-                enc_field_context = attn_scores[2].unsqueeze(1).bmm(enc_field_vals).squeeze(1)
                 enc_output_context = torch.cat((enc_output_context, enc_field_context), 1)
-                enc_context_proj += self.w_f(enc_field_context)
 
         else:
             # output
@@ -429,13 +414,16 @@ class DecoderRNN(BaseRNN):
             cov_mean = coverage.mean(dim=-1, keepdim=True)
             # print('cov_mean: {}'.format(cov_mean))
             enc_context_proj += cov_mean
-        p_gen = torch.sigmoid(enc_context_proj + self.w_d(dec_hidden) + self.w_y(decoder_input)).view(-1, 1)
+        p_gen_logits = enc_context_proj + self.w_d(dec_hidden) + self.w_y(decoder_input)
+        # print('p_gen_logits: {}'.format(p_gen_logits.size()))
+        p_gen = torch.sigmoid(p_gen_logits).view(-1, 1)
         # print('p_gen: {}'.format(p_gen.size()))
 
         weighted_Pvocab = p_vocab * p_gen
         # print('weighted_Pvocab: {}'.format(weighted_Pvocab.size()))
 
         attn_weights = attn_scores[0]
+        # print('attn_weights: {}'.format(attn_weights.size()))
 
         weighted_attn = (1-p_gen) * attn_weights
         # print('weighted_attn: {}'.format(weighted_attn.size()))
@@ -532,10 +520,9 @@ class DecoderRNN(BaseRNN):
                     # print('_cov_loss: {}'.format(_cov_loss.size()))
                     cov_loss.append(_cov_loss.sum(1))
 
-            # NOTE: loss is normalized by length
-            # TODO: use sum of loss
-            # total_masked_loss = torch.cat(lm_loss, 1).sum(1).div(dec_lens)
-            total_masked_loss = torch.cat(lm_loss, 1).sum(1)
+            # NOTE: loss is normalized by length, use sum of loss leads to faster conversion
+            total_masked_loss = torch.cat(lm_loss, 1).sum(1).div(dec_lens)
+            # total_masked_loss = torch.cat(lm_loss, 1).sum(1)
             if self.use_cov_loss:
                 total_masked_loss = total_masked_loss + self.lmbda * torch.stack(cov_loss, 1).sum(1).div(dec_lens)
 
@@ -593,7 +580,7 @@ class DecoderRNN(BaseRNN):
                 eos_batch = eos_batch.cpu().view(-1).numpy()
                 update_idx = ((lengths > step) & eos_batch) != 0
                 lengths[update_idx] = len(decoded_outputs)
-            # change unk to corresponding field
+            # replace oov with the corresponding field embedding
             for i in range(symbols.size(0)):
                 w2f = w2fs[i]
                 if symbols[i].item() > self.vocab_size-1:

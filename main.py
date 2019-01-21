@@ -5,8 +5,8 @@ import torch.nn as nn
 import torch.optim as optim
 from predictor import Predictor
 from utils.loader import Table2text_seq
-# from utils.loader_wikibio import Table2text_seq
-from structure_generator.EncoderRNN import EncoderRNN
+from utils.loader_wikibio import Table2text_seq
+# from structure_generator.EncoderRNN import EncoderRNN
 from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq
 from configurations import Config, ConfigSmall, ConfigTest
@@ -99,9 +99,9 @@ if not os.path.exists(save_file_dir):
         os.mkdir(os.path.join(save_file_dir, "evaluations"))
 
 # -------------------------------- Hyperparams and Tensorboard ------------------------------------ #
-config = ConfigTest()
-# config = Config()
-# config.batch_size = args.batch
+# config = ConfigTest()
+config = Config()
+config.batch_size = args.batch
 
 summary_dir = os.path.join(save_file_dir, "summary")
 if not os.path.exists(summary_dir):
@@ -276,8 +276,10 @@ if __name__ == "__main__":
 
             L.info("start training...")
             train_epoches(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1)
+            writer.close()
         except KeyboardInterrupt:
             L.info('-' * 89)
+            writer.close()
             torch.save(model.state_dict(), "{}/model_before_kill.pkl".format(save_file_dir))
             L.info("Model saved at: {}/model_before_kill.pkl".format(save_file_dir))
             L.info('Exiting from training early')
@@ -295,9 +297,12 @@ if __name__ == "__main__":
 
             L.info("start training...")
             train_epoches(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1, load_epoch=load_epoch)
+            writer.close()
         except KeyboardInterrupt:
             L.info('-' * 89)
             L.info('Exiting from training early')
+            writer.close()
+
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
         L.info("Read $-{}-$ data".format(args.dataset))
         predictor = Predictor(model, dataset.vocab, args.cuda)

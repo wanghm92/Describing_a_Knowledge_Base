@@ -72,11 +72,13 @@ class Vocabulary:
         source_oov = {}  # {oov: id start from 0}
         _o_source, _source = [], []
         cnt = 0
+        oov_freq = 0
         for word in vector:
             try:
                 _o_source.append(self.word2idx[word])
                 _source.append(self.word2idx[word])
             except KeyError:
+                oov_freq += 1
                 if word not in source_oov:
                     _o_source.append(cnt + self.size)
                     source_oov[word] = cnt
@@ -85,15 +87,17 @@ class Vocabulary:
                     _o_source.append(source_oov[word] + self.size)
                 # NOTE: use field type embedding for OOV field values
                 _source.append(self.word2idx[table[word]])
-        return _o_source, source_oov, _source
+        return _o_source, source_oov, _source, oov_freq
 
     def vectorize_target(self, vector, source_oov, table):
         _o_target, _target = [], []
+        oov_freq = 0
         for word in vector:
             try:
                 _o_target.append(self.word2idx[word])
                 _target.append(self.word2idx[word])
             except KeyError:
+                oov_freq += 1
                 # NOTE: use UNK for text words not in source OOVs
                 if word not in source_oov:
                     _o_target.append(self.word2idx['<UNK>'])
@@ -102,7 +106,7 @@ class Vocabulary:
                     # NOTE: use source_oov idx for OOV text words but appear in source OOVs
                     _o_target.append(source_oov[word] + self.size)
                     _target.append(self.word2idx[table[word]])
-        return self.add_start_end(_o_target), self.add_start_end(_target)
+        return self.add_start_end(_o_target), self.add_start_end(_target), oov_freq
 
 
 class Table2text_seq:
@@ -117,6 +121,11 @@ class Table2text_seq:
         self.batch_size = batch_size
         self.USE_CUDA = USE_CUDA
         self.device = torch.device("cuda" if USE_CUDA else "cpu")
+
+        self.oov_cnt_src = 0
+        self.oov_cnt_tgt = 0
+        self.total_cnt_src = 0
+        self.total_cnt_tgt = 0
 
         # ----------------------- file names ------------------------- #
         if data_src == 'train':
@@ -249,6 +258,10 @@ class Table2text_seq:
         corpus = []
         for sample in tqdm(samples):
             corpus.append(self.vectorize(sample))
+        print("oov_cnt_src: {0} ({1:.3f}%)".format(self.oov_cnt_src, 100.0*self.oov_cnt_src/self.total_cnt_src))
+        print("oov_cnt_tgt: {0} ({1:.3f}%)".format(self.oov_cnt_tgt, 100.0*self.oov_cnt_tgt/self.total_cnt_tgt))
+        print("total_cnt_src: {}".format(self.total_cnt_src))
+        print("total_cnt_tgt: {}".format(self.total_cnt_tgt))
         return corpus
 
     def pad_vector(self, vector, maxlen):
@@ -289,8 +302,13 @@ class Table2text_seq:
 
             # ----------------------- word to ids ------------------------- #
             _o_fields = self.vocab.vectorize_field(field)
-            _o_source, source_oov, _source = self.vocab.vectorize_source(source, table)
-            _o_target, _target = self.vocab.vectorize_target(target, source_oov, table)
+            _o_source, source_oov, _source, oov_freq_src = self.vocab.vectorize_source(source, table)
+            _o_target, _target, oov_freq_tgt = self.vocab.vectorize_target(target, source_oov, table)
+
+            self.oov_cnt_src += oov_freq_src
+            self.oov_cnt_tgt += oov_freq_tgt
+            self.total_cnt_src += len(_source)
+            self.total_cnt_tgt += len(_target)
 
             source_oov = source_oov.items()
             if max_source_oov < len(source_oov):
