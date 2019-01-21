@@ -14,10 +14,12 @@ class DecoderRNN(BaseRNN):
                  rnn_cell='gru', directions=2,
                  attn_src='emb', attn_type='concat', attn_fuse='sum', attn_level=2,
                  use_cov_loss=True, use_cov_attn=True, cov_in_pgen=False,
-                 field_self_att=False, field_concat_pos=False, field_context=False, context_mlp=False,
+                 field_self_att=False, field_concat_pos=False,
+                 field_context=False, context_mlp=False,
                  mask=False, use_cuda=True,
                  n_layers=1, input_dropout_p=0, dropout_p=0, max_len=100, lmbda=1.5):
-        
+
+        # TODO: set hidden_size to higher than embed_size
         hidden_size = embed_size
 
         super(DecoderRNN, self).__init__(vocab_size, hidden_size, input_dropout_p, dropout_p, n_layers, rnn_cell)
@@ -34,8 +36,7 @@ class DecoderRNN(BaseRNN):
         self.field_concat_pos = field_concat_pos
         self.field_context = field_context
         self.context_mlp = context_mlp
-        # TODO: input feeding
-        self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
+        self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)  # TODO: input feeding
         self.output_size = vocab_size
         self.hidden_size = hidden_size
         self.max_length = max_len
@@ -52,13 +53,12 @@ class DecoderRNN(BaseRNN):
 
         # ----------------- parameters for self attention ----------------- #
         self_size = pemsize * 2
-        # print('self_size: {}'.format(self_size))
         self.Win = nn.Linear(self_size, self_size)
         self.Wout = nn.Linear(self_size, self_size)
         self.Wg = nn.Linear(self_size, self_size)
 
-        # ----------------- params for attention ----------------- #
-        enc_input_size = hidden_size * self.directions
+        # ----------------- params for attention score ----------------- #
+        # TODO: different field input size
         field_input_size = hidden_size
         # print('enc_input_size: {}'.format(enc_input_size))
         if self.attn_level > 1 and self.field_concat_pos:
@@ -73,31 +73,33 @@ class DecoderRNN(BaseRNN):
                 self.v_hidden = nn.Linear(hidden_size, 1)
                 self.v_input = nn.Linear(hidden_size, 1)
                 self.v_field = nn.Linear(hidden_size, 1)
-                self.Wd_hidden = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
-                self.Wd_input = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
-                self.Wd_field = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
+                self.Wd_hidden = nn.Linear(hidden_size, hidden_size)
+                self.Wd_input = nn.Linear(hidden_size, hidden_size)
+                self.Wd_field = nn.Linear(hidden_size, hidden_size)
 
             elif self.attn_level == 2:
                 self.v_field = nn.Linear(hidden_size, 1)
-                self.Wd_field = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
+                self.Wd_field = nn.Linear(hidden_size, hidden_size)
 
                 if self.attn_src == 'emb':
                     self.v_input = nn.Linear(hidden_size, 1)
-                    self.Wd_input = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
+                    self.Wd_input = nn.Linear(hidden_size, hidden_size)
 
                 elif self.attn_src == 'rnn':
                     self.v_hidden = nn.Linear(hidden_size, 1)
-                    self.Wd_hidden = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
+                    self.Wd_hidden = nn.Linear(hidden_size, hidden_size)
 
             else:
                 self.v_hidden = nn.Linear(hidden_size, 1)
-                self.Wd_hidden = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
+                self.Wd_hidden = nn.Linear(hidden_size, hidden_size)
 
         self.Wf = nn.Linear(field_input_size, hidden_size)
 
+        # ----------------- params for encoder memory keys ----------------- #
+        enc_input_size = hidden_size * self.directions
         if self.attn_level == 3:
-            self.We = nn.Linear(hidden_size, hidden_size)  # e_t: word embeddings
-            self.Wr = nn.Linear(enc_input_size, hidden_size)  # e_t: encoder hidden states
+            self.We = nn.Linear(hidden_size, hidden_size)  # e_t: word embeddings to keys
+            self.Wr = nn.Linear(enc_input_size, hidden_size)  # e_t: encoder hidden states to keys
         elif self.attn_level == 2:
             if self.attn_src == 'emb':
                 self.We = nn.Linear(hidden_size, hidden_size)
@@ -121,7 +123,7 @@ class DecoderRNN(BaseRNN):
                 output_layer_input_size += field_input_size
             if self.attn_src == 'emb':
                 output_layer_input_size += hidden_size
-            if self.attn_src == 'rnn':
+            elif self.attn_src == 'rnn':
                 output_layer_input_size += enc_input_size
         else:
             output_layer_input_size += enc_input_size
@@ -141,12 +143,17 @@ class DecoderRNN(BaseRNN):
         self.w_y = nn.Linear(embed_size,  1)        # decoder input word embedding
 
 
-    def _pos_self_attn(self, enc_pos, enc_hidden, enc_input, enc_field):
+    def _pos_self_attn(self, enc_pos, enc_hidden, enc_input, enc_field, enc_mask):
         """ compute the self-attentive encoder output and field encodings"""
+
+        enc_mask_float = enc_mask.unsqueeze(2).float()
+        enc_mask_2d = enc_mask_float.bmm(enc_mask_float.transpose(1, 2))
 
         gin = torch.tanh(self.Win(enc_pos))
         gout = torch.tanh(self.Wout(enc_pos))
+
         f = gin.bmm(self.Wg(gout).transpose(1, 2))
+        f.masked_fill_(enc_mask_2d.data.byte(), -np.inf)  # mask to -inf before applying softmax
         f_matrix = F.softmax(f, dim=2)
 
         if self.attn_level == 3:
@@ -478,7 +485,7 @@ class DecoderRNN(BaseRNN):
         # get position self-attention scores
         if self.field_self_att:
             f_matrix, enc_hidden_vals, enc_input_vals, enc_field_vals\
-                = self._pos_self_attn(enc_pos, enc_hidden, enc_input, enc_field)
+                = self._pos_self_attn(enc_pos, enc_hidden, enc_input, enc_field, enc_mask)
         else:
             f_matrix = None
             enc_hidden_vals = enc_hidden
@@ -527,7 +534,8 @@ class DecoderRNN(BaseRNN):
 
             # NOTE: loss is normalized by length
             # TODO: use sum of loss
-            total_masked_loss = torch.cat(lm_loss, 1).sum(1).div(dec_lens)
+            # total_masked_loss = torch.cat(lm_loss, 1).sum(1).div(dec_lens)
+            total_masked_loss = torch.cat(lm_loss, 1).sum(1)
             if self.use_cov_loss:
                 total_masked_loss = total_masked_loss + self.lmbda * torch.stack(cov_loss, 1).sum(1).div(dec_lens)
 

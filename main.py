@@ -101,7 +101,7 @@ if not os.path.exists(save_file_dir):
 # -------------------------------- Hyperparams and Tensorboard ------------------------------------ #
 config = ConfigTest()
 # config = Config()
-config.batch_size = args.batch
+# config.batch_size = args.batch
 
 summary_dir = os.path.join(save_file_dir, "summary")
 if not os.path.exists(summary_dir):
