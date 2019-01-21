@@ -17,7 +17,6 @@ class DecoderRNN(BaseRNN):
                  use_cov_loss=True, use_cov_attn=True, cov_in_pgen=False,
                  field_self_att=False, field_concat_pos=False,
                  field_context=False, context_mlp=False,
-                 enc_state_mlp=True,
                  mask=False, use_cuda=True, unk_gen=False,
                  n_layers=1, input_dropout_p=0, dropout_p=0, max_len=100, lmbda=1.5):
 
@@ -46,7 +45,7 @@ class DecoderRNN(BaseRNN):
         self.embedding = embedding
         self.lmbda = lmbda
         self.use_cuda = use_cuda
-        self.enc_state_mlp = enc_state_mlp
+        self.enc_state_mlp = (self.directions == 2)
 
         # ----------------- params for directions ----------------- #
         if self.enc_state_mlp:
@@ -71,19 +70,19 @@ class DecoderRNN(BaseRNN):
         else:
             if self.attn_level == 3:
                 self.v_hidden = nn.Linear(hidden_size, 1)
-                self.v_input = nn.Linear(embed_size, 1)
-                self.v_field = nn.Linear(fdsize, 1)
+                self.v_input = nn.Linear(hidden_size, 1)
+                self.v_field = nn.Linear(hidden_size, 1)
                 self.Wd_hidden = nn.Linear(hidden_size, hidden_size)
-                self.Wd_input = nn.Linear(embed_size, hidden_size)
-                self.Wd_field = nn.Linear(fdsize, hidden_size)
+                self.Wd_input = nn.Linear(hidden_size, hidden_size)
+                self.Wd_field = nn.Linear(hidden_size, hidden_size)
 
             elif self.attn_level == 2:
-                self.v_field = nn.Linear(fdsize, 1)
-                self.Wd_field = nn.Linear(fdsize, hidden_size)
+                self.v_field = nn.Linear(hidden_size, 1)
+                self.Wd_field = nn.Linear(hidden_size, hidden_size)
 
                 if self.attn_src == 'emb':
-                    self.v_input = nn.Linear(embed_size, 1)
-                    self.Wd_input = nn.Linear(embed_size, hidden_size)
+                    self.v_input = nn.Linear(hidden_size, 1)
+                    self.Wd_input = nn.Linear(hidden_size, hidden_size)
 
                 elif self.attn_src == 'rnn':
                     self.v_hidden = nn.Linear(hidden_size, 1)
@@ -93,21 +92,21 @@ class DecoderRNN(BaseRNN):
                 self.v_hidden = nn.Linear(hidden_size, 1)
                 self.Wd_hidden = nn.Linear(hidden_size, hidden_size)
 
+        # ----------------- params for encoder memory keys ----------------- #
         self.Wf = nn.Linear(field_input_size, hidden_size)
 
-        # ----------------- params for encoder memory keys ----------------- #
-        enc_input_size = hidden_size * self.directions
+        enc_hidden_size = hidden_size * self.directions
         if self.attn_level == 3:
             self.We = nn.Linear(embed_size, hidden_size)  # e_t: word embeddings to keys
-            self.Wr = nn.Linear(enc_input_size, hidden_size)  # e_t: encoder hidden states to keys
+            self.Wr = nn.Linear(enc_hidden_size, hidden_size)  # e_t: encoder hidden states to keys
         elif self.attn_level == 2:
             if self.attn_src == 'emb':
                 self.We = nn.Linear(embed_size, hidden_size)
             elif self.attn_src == 'rnn':
-                self.Wr = nn.Linear(enc_input_size, hidden_size)
+                self.Wr = nn.Linear(enc_hidden_size, hidden_size)
         else:
             # NOTE: assume to use encoder rnn hidden states when attn_level == 1
-            self.Wr = nn.Linear(enc_input_size, hidden_size)
+            self.Wr = nn.Linear(enc_hidden_size, hidden_size)
 
         if self.use_cov_attn:
             self.Wc = nn.Linear(1, hidden_size)  # e_t: coverage vector
@@ -115,7 +114,7 @@ class DecoderRNN(BaseRNN):
         # ----------------- params for output ----------------- #
         output_layer_input_size = 0  # decoder state size
         if self.attn_level == 3:
-            output_layer_input_size += (hidden_size + enc_input_size)
+            output_layer_input_size += (hidden_size + embed_size)
             if self.field_context:
                 output_layer_input_size += field_input_size
         elif self.attn_level == 2:
@@ -124,9 +123,9 @@ class DecoderRNN(BaseRNN):
             if self.attn_src == 'emb':
                 output_layer_input_size += hidden_size
             elif self.attn_src == 'rnn':
-                output_layer_input_size += enc_input_size
+                output_layer_input_size += enc_hidden_size
         else:
-            output_layer_input_size += enc_input_size
+            output_layer_input_size += enc_hidden_size
 
         # print('output_layer_input_size: {}'.format(output_layer_input_size))
         if self.context_mlp:
@@ -136,7 +135,7 @@ class DecoderRNN(BaseRNN):
             self.V = nn.Linear(output_layer_input_size + hidden_size, self.output_size)
 
         # ----------------- parameters for p_gen ----------------- #
-        self.w_r = nn.Linear(enc_input_size, 1)     # encoder hidden context
+        self.w_r = nn.Linear(enc_hidden_size, 1)     # encoder hidden context
         self.w_e = nn.Linear(embed_size, 1)        # encoder word context
         self.w_f = nn.Linear(field_input_size, 1)   # encoder field context
         self.w_d = nn.Linear(hidden_size, 1)        # decoder hidden state
@@ -633,7 +632,9 @@ class DecoderRNN(BaseRNN):
             (#directions * #layers, #batch, hidden_size) -> (#layers, #batch, #directions * hidden_size)
         """
         if self.directions == 2:
-            h = torch.cat([h[0:h.size(0):2], h[1:h.size(0):2]], 2)
+            fw = h[0:h.size(0):2]
+            bw = h[1:h.size(0):2]
+            h = torch.cat([fw, bw], 2)
             if self.enc_state_mlp:
                 h = self.W_enc_state(h)
         return h

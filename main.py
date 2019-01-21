@@ -9,8 +9,9 @@ from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq
 from configurations import Config, ConfigSmall, ConfigTest, ConfigWikibio
 from eval import Evaluate
-import random, os, pprint, logging
+import random, os, pprint, logging, time
 from tensorboardX import SummaryWriter
+from tqdm import tqdm
 
 program = os.path.basename(sys.argv[0])
 L = logging.getLogger(program)
@@ -104,11 +105,9 @@ else:
     config = Config()
     from utils.loader import Table2text_seq
 
-print("config is: {}".format(config))
-
-# config = ConfigTest()
-
 config.batch_size = args.batch
+# config = ConfigTest()
+print("config is: {}".format(config))
 
 summary_dir = os.path.join(save_file_dir, "summary")
 if not os.path.exists(summary_dir):
@@ -171,11 +170,14 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         if args.shuffle:
             random.shuffle(batch_indices)
 
+        start_time = time.time()
         for idx, batch_idx in enumerate(batch_indices):
             loss, num_examples = train_batch(t_dataset, batch_idx, model, teacher_forcing_ratio)
             epoch_loss += loss * num_examples
-            sys.stdout.write('%d batches trained. current batch loss: %f\r' % (idx, loss))
-            sys.stdout.flush()
+            if idx%10 == 0:
+                end_time = time.time()
+                sys.stdout.write('%d batches trained. current batch loss: %f [%.3fs]\r' % (idx, loss, end_time-start_time))
+                sys.stdout.flush()
 
         epoch_loss /= epoch_examples_total
         L.info("Finished epoch %d with average loss: %.4f" % (epoch, epoch_loss))
@@ -253,7 +255,7 @@ if __name__ == "__main__":
     L.info("Building Model ...")
     embedding = nn.Embedding(t_dataset.vocab.size, config.emsize, padding_idx=0)
     if args.type == 2:
-        assert hasattr(t_dataset.vocab, 'field_size')
+        assert hasattr(t_dataset.vocab, 'field_vocab_size')
         field_embedding = nn.Embedding(t_dataset.vocab.field_vocab_size, config.fdsize, padding_idx=0)
         hidden_size = config.hdsize
         fd_size = config.fdsize

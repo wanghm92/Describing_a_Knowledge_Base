@@ -18,6 +18,9 @@ class ConfigWikibio(object):
     emsize = 400
     fdsize = 50
     hdsize = 500
+    # emsize = 256
+    # fdsize = 64
+    # hdsize = 256
     pemsize = 5
     nlayers = 1
     lr = 0.0005
@@ -25,6 +28,7 @@ class ConfigWikibio(object):
     batch_size = 32
     dropout = 0
     directions = 1
+    # directions = 2
     max_grad_norm = 5
     max_len = 100
     enc_state_mlp = False
@@ -45,13 +49,13 @@ class ConfigSmall(object):
     unk_gen = False
 
 class ConfigTest(object):
-    cell = "GRU"
+    cell = "LSTM"
     emsize = 30
     pemsize = 5
     nlayers = 1
     lr = 0.001
     epochs = 2
-    batch_size = 2
+    batch_size = 3
     dropout = 0
     directions = 2
     max_grad_norm = 1
