@@ -39,8 +39,8 @@ class Vocabulary:
             print("Finish build vocabulary")
             self._build_word_index()
             print("Finish build word dictionary")
-            self.size = len(word2idx)
-            self.field_vocab_size = len(field2idx)
+            self.size = len(self.word2idx)
+            self.field_vocab_size = len(self.field2idx)
 
     def _build_vocabulary(self, corpus, field):
         vocabulary = Counter(word for sent in corpus for word in sent)
