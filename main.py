@@ -109,7 +109,8 @@ else:
 
 config.batch_size = args.batch
 # config = ConfigTest()
-print("config is: {}".format(config))
+print("config is: \n")
+pprint.pprint(vars(config), indent=2)
 
 summary_dir = os.path.join(save_file_dir, "summary")
 if not os.path.exists(summary_dir):
@@ -127,6 +128,7 @@ if args.type == 1:
 else:
     filepost += "_P.txt"
 
+print("args are: \n")
 pprint.pprint(vars(args), indent=2)
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------ Training Functions ------------------------------------------ #
@@ -189,7 +191,7 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         predictor = Predictor(model, v_dataset.vocab, args.cuda)
         L.info("Start Evaluating ...")
         cand, ref, eval_loss, others = predictor.preeval_batch(v_dataset)
-        cands_with_pgens, srcs, fds = others
+        cands_with_unks, cands_with_pgens, srcs, fds = others
         writer.add_scalar('valid/loss', eval_loss, epoch)
         L.info('Result:')
         L.info('eval_loss: {}'.format(eval_loss))
@@ -198,6 +200,8 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         L.info('\nsource[1]: {}'.format(srcs[1]))
         L.info('\nfield[1]: {}'.format(fds[1]))
         L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
+        L.info('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
+
         eval_file_out = "{}/evaluations/valid.epoch_{}.cand.live.txt".format(save_file_dir, epoch)
         with open(eval_file_out, 'w+') as fout:
             for c in range(len(cand)):
@@ -206,6 +210,11 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         with open(eval_file_out_pgen, 'w+') as fout:
             for c in range(len(cands_with_pgens)):
                 fout.write("{}\n".format(cands_with_pgens[c + 1]))
+        eval_file_out_unk = "{}/evaluations/valid.epoch_{}.cand.unk.txt".format(save_file_dir, epoch)
+        with open(eval_file_out_unk, 'w+') as fout:
+            for c in range(len(cands_with_unks)):
+                fout.write("{}\n".format(cands_with_unks[c + 1]))
+
 
         # --------------------------------------- evaluation -------------------------------------------- #
         final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=epoch)
@@ -336,7 +345,7 @@ if __name__ == "__main__":
 
         L.info("Start Evaluating ...")
         cand, ref, eval_loss, others = predictor.preeval_batch(dataset)
-        cands_with_pgens, srcs, fds = others
+        cands_with_unks, cands_with_pgens, srcs, fds = others
         L.info('Result:')
         L.info('eval_loss: {}'.format(eval_loss))
         L.info('\nref[1]: {}'.format(ref[1][0]))
@@ -344,6 +353,7 @@ if __name__ == "__main__":
         L.info('\nsource[1]: {}'.format(srcs[1]))
         L.info('\nfield[1]: {}'.format(fds[1]))
         L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
+        L.info('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
 
     # ----------------------------------- evaluation ---------------------------------------- #
     elif args.mode == 2:
@@ -357,8 +367,8 @@ if __name__ == "__main__":
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
-        cand, ref, eval_loss, others = predictor.preeval_batch(dataset, fig=True, save_file_dir=save_file_dir)
-        cands_with_pgens, srcs, fds = others
+        cand, ref, eval_loss, others = predictor.preeval_batch(dataset, fig=False, save_dir=save_file_dir)
+        cands_with_unks, cands_with_pgens, srcs, fds = others
         L.info('Result:')
         L.info('eval_loss: {}'.format(eval_loss))
         L.info('\nref[1]: {}'.format(ref[1][0]))
@@ -366,6 +376,7 @@ if __name__ == "__main__":
         L.info('\nsource[1]: {}'.format(srcs[1]))
         L.info('\nfield[1]: {}'.format(fds[1]))
         L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
+        L.info('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
 
         cand_file_out = "{}/evaluations/{}.epoch_{}.cand.txt".format(save_file_dir, args.dataset, load_epoch)
         with open(cand_file_out, 'w+') as fout:
@@ -376,6 +387,11 @@ if __name__ == "__main__":
         with open(cand_pgen_file_out, 'w+') as fout:
             for c in range(len(cands_with_pgens)):
                 fout.write("{}\n".format(cands_with_pgens[c+1]))
+
+        cand_unk_file_out = "{}/evaluations/{}.epoch_{}.cand.unk.txt".format(save_file_dir, args.dataset, load_epoch)
+        with open(cand_unk_file_out, 'w+') as fout:
+            for c in range(len(cands_with_unks)):
+                fout.write("{}\n".format(cands_with_unks[c+1]))
 
         ref_file_out = "{}/evaluations/{}.ref.sum.txt".format(save_file_dir, args.dataset)
         with open(ref_file_out, 'w+') as fout:

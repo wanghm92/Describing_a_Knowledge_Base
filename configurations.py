@@ -10,7 +10,6 @@ class Config(object):
     directions = 2
     max_grad_norm = 10
     max_len = 100
-    enc_state_mlp = True
     unk_gen = False
 
 class ConfigWikibio(object):
@@ -31,8 +30,7 @@ class ConfigWikibio(object):
     # directions = 2
     max_grad_norm = 5
     max_len = 100
-    enc_state_mlp = False
-    unk_gen = True  # allow generating UNK
+    unk_gen = False  # allow generating UNK
 
 class ConfigSmall(object):
     cell = "GRU"

@@ -30,11 +30,12 @@ class Predictor(object):
         print(len(output))
         return ' '.join([i for i in output if i != '<PAD>' and i != '<EOS>' and i != '<SOS>'])
 
-    def preeval_batch(self, dataset, fig=False, save_file_dir=None):
+    def preeval_batch(self, dataset, fig=False, save_dir=None):
         torch.set_grad_enabled(False)
         refs = {}
         cands = {}
         cands_with_pgens = {}
+        cands_with_unks = {}
         srcs = {}
         fds = {}
         i = 0
@@ -54,42 +55,54 @@ class Predictor(object):
                 srcs[i] = ' '.join(['_'.join(x.split()) for x in sources[j]])
                 fds[i] = ' '.join(fields[j])
                 refs[i] = [' '.join(targets[j])]
-                out_seq = []
+                out_seq_clean = []
+                out_seq_unk = []
                 for k in range(lens[j]):
                     # get tokens and replace OOVs
                     symbol = decouts[j][k].item()
                     if symbol < self.vocab.size:
-                        out_seq.append(self.vocab.idx2word[symbol])
+                        if symbol == 1:
+                            replacement = sources[j][attns[j][k].argmax()]
+                            out_seq_clean.append(replacement)
+                        else:
+                            out_seq_clean.append(self.vocab.idx2word[symbol])
+                        out_seq_unk.append(self.vocab.idx2word[symbol])
                     else:
-                        out_seq.append(list_oovs[j][symbol-self.vocab.size])
-                out, out_with_gens = self.post_process(out_seq, p_gens[j])
+                        oov = list_oovs[j][symbol-self.vocab.size]
+                        out_seq_clean.append(oov)
+                        out_seq_unk.append(oov)
+
+                out, out_unk, out_with_gens = self.post_process(out_seq_clean, out_seq_unk, p_gens[j])
                 if fig and len(out) > 0 and j < figs_per_batch:
-                    self.make_figure(lens[j], out, selfatt[j], attns[j], batch_pf[j], sources[j], batch_idx+j, save_file_dir)
+                    fmatrix = selfatt[j] if selfatt is not None else None
+                    self.make_figure(lens[j], out, fmatrix, attns[j], batch_pf[j], sources[j], batch_idx+j, save_dir)
                 cands[i] = ' '.join(out)
                 cands_with_pgens[i] = ' '.join(out_with_gens)
+                cands_with_unks[i] = ' '.join(out_unk)
 
-        return cands, refs, eval_loss/total_batches, (cands_with_pgens, srcs, fds)
+        return cands, refs, eval_loss/total_batches, (cands_with_unks, cands_with_pgens, srcs, fds)
 
-    def post_process(self, sentence, p_gens=None):
+    def post_process(self, sentence, sentence_unk, p_gens=None):
         try:
             eos = sentence.index('<EOS>')
             sentence = sentence[:eos]
+            sentence_unk = sentence_unk[:eos]
             if p_gens is not None:
                 p_gens = p_gens[:eos]
         except ValueError:
             pass
 
         if p_gens is None:
-            return ' '.join([x for x in sentence if x != '<PAD>' and x != '<EOS>' and x != '<SOS>']), None
+            return [x for x in sentence if x != '<PAD>' and x != '<EOS>' and x != '<SOS>'], [], []
         else:
-            token_pgens = [(x, y.item()) for x, y in zip(sentence, p_gens) if x != '<PAD>' and x != '<EOS>' and x != '<SOS>']
+            token_pgens = [(x, y, z.item()) for x, y, z in zip(sentence, sentence_unk, p_gens) if x != '<PAD>' and x != '<EOS>' and x != '<SOS>']
             if len(token_pgens) > 0:
-                out, pgens_filtered = zip(*token_pgens)
+                out, out_unk, pgens_filtered = zip(*token_pgens)
                 pgens_filtered = ["_%.3f"%x if x < 0.7 else '' for x in pgens_filtered]
                 out_with_gens = ["{}{}".format('_'.join(x.split()), y) for x, y in zip(out, pgens_filtered)]
-                return list(out), out_with_gens
+                return list(out), list(out_unk), out_with_gens
             else:
-                return [], []
+                return [], [], []
 
     def showAttention(self, input_words, output_words, attentions, attn='self', xlabel="", ylabel="", idx=0, dir=''):
         # Set up figure with colorbar
@@ -114,14 +127,14 @@ class Predictor(object):
         fig.savefig(os.path.join(dir, "attention_figures/{}.{}.png".format(attn, idx)), bbox_inches='tight')
         plt.close(fig)
 
-    def make_figure(self, length, out, selfatt, attns, batch_pf, src_words, idx, savedir):
+    def make_figure(self, length, out, fmatrix, attns, batch_pf, src_words, idx, savedir):
         pos = [str(i) for i in batch_pf.cpu().tolist() if i >0]
         combine = []
         for j in range(len(pos)):
             combine.append(src_words[j] + " : " + pos[j])
 
-        if selfatt is not None:
-            self.showAttention(pos, combine, selfatt.cpu(),
+        if fmatrix is not None:
+            self.showAttention(pos, combine, fmatrix.cpu(),
                                attn='self', xlabel='Table Position', ylabel='Table Position', idx=idx, dir=savedir)
         self.showAttention(combine, out, attns[:len(out)].cpu(),
                            attn='attn', xlabel='Structured KB', ylabel='Text Output', idx=idx, dir=savedir)

@@ -45,10 +45,9 @@ class DecoderRNN(BaseRNN):
         self.embedding = embedding
         self.lmbda = lmbda
         self.use_cuda = use_cuda
-        self.enc_state_mlp = (self.directions == 2)
 
         # ----------------- params for directions ----------------- #
-        if self.enc_state_mlp:
+        if self.directions == 2:
             self.W_enc_state = nn.Linear(hidden_size * 2, hidden_size)
 
         # ----------------- parameters for self attention ----------------- #
@@ -635,8 +634,7 @@ class DecoderRNN(BaseRNN):
             fw = h[0:h.size(0):2]
             bw = h[1:h.size(0):2]
             h = torch.cat([fw, bw], 2)
-            if self.enc_state_mlp:
-                h = self.W_enc_state(h)
+            h = self.W_enc_state(h)
         return h
 
     def _validate_args(self, targets, enc_state, encoder_outputs, teacher_forcing_ratio):
