@@ -10,18 +10,18 @@ from .baseRNN import BaseRNN
 
 class DecoderRNN(BaseRNN):
 
-    def __init__(self, vocab_size=0, embedding=None, embed_size=0, hidden_size=0, fdsize=0, pemsize=0,
+    def __init__(self, dec_type='pg', vocab_size=0, embedding=None, embed_size=0, hidden_size=0, fdsize=0, pemsize=0,
                  sos_id=3, eos_id=2, unk_id=1,
                  rnn_cell='gru', directions=2,
                  attn_src='emb', attn_type='concat', attn_fuse='sum', attn_level=2,
                  use_cov_loss=True, use_cov_attn=True, cov_in_pgen=False,
-                 field_self_att=False, field_concat_pos=False,
-                 field_context=False, context_mlp=False,
+                 field_self_att=False, field_concat_pos=False, field_context=False, context_mlp=False,
                  mask=False, use_cuda=True, unk_gen=False,
                  n_layers=1, input_dropout_p=0, dropout_p=0, max_len=100, lmbda=1.5):
 
         super(DecoderRNN, self).__init__(vocab_size, hidden_size, input_dropout_p, dropout_p, n_layers, rnn_cell)
 
+        self.decoder_type = dec_type
         self.attn_src = attn_src
         self.attn_type = attn_type
         self.attn_fuse = attn_fuse
@@ -111,35 +111,36 @@ class DecoderRNN(BaseRNN):
             self.Wc = nn.Linear(1, hidden_size)  # e_t: coverage vector
 
         # ----------------- params for output ----------------- #
-        output_layer_input_size = 0  # decoder state size
-        if self.attn_level == 3:
-            output_layer_input_size += (hidden_size + embed_size)
-            if self.field_context:
-                output_layer_input_size += field_input_size
-        elif self.attn_level == 2:
-            if self.field_context:
-                output_layer_input_size += field_input_size
-            if self.attn_src == 'emb':
-                output_layer_input_size += hidden_size
-            elif self.attn_src == 'rnn':
+        if self.decoder_type != 'pt':
+            output_layer_input_size = 0  # decoder state size
+            if self.attn_level == 3:
+                output_layer_input_size += (hidden_size + embed_size)
+                if self.field_context:
+                    output_layer_input_size += field_input_size
+            elif self.attn_level == 2:
+                if self.field_context:
+                    output_layer_input_size += field_input_size
+                if self.attn_src == 'emb':
+                    output_layer_input_size += hidden_size
+                elif self.attn_src == 'rnn':
+                    output_layer_input_size += enc_hidden_size
+            else:
                 output_layer_input_size += enc_hidden_size
-        else:
-            output_layer_input_size += enc_hidden_size
 
-        # print('output_layer_input_size: {}'.format(output_layer_input_size))
-        if self.context_mlp:
-            self.V1 = nn.Linear(output_layer_input_size, hidden_size)
-            self.V2 = nn.Linear(hidden_size*2, self.output_size)
-        else:
-            self.V = nn.Linear(output_layer_input_size + hidden_size, self.output_size)
+            # print('output_layer_input_size: {}'.format(output_layer_input_size))
+            if self.context_mlp:
+                self.V1 = nn.Linear(output_layer_input_size, hidden_size)
+                self.V2 = nn.Linear(hidden_size*2, self.output_size)
+            else:
+                self.V = nn.Linear(output_layer_input_size + hidden_size, self.output_size)
 
         # ----------------- parameters for p_gen ----------------- #
-        self.w_r = nn.Linear(enc_hidden_size, 1)     # encoder hidden context
-        self.w_e = nn.Linear(embed_size, 1)        # encoder word context
-        self.w_f = nn.Linear(field_input_size, 1)   # encoder field context
-        self.w_d = nn.Linear(hidden_size, 1)        # decoder hidden state
-        self.w_y = nn.Linear(embed_size,  1)        # decoder input word embedding
-
+        if self.decoder_type == 'pg':
+            self.w_r = nn.Linear(enc_hidden_size, 1)    # encoder hidden context
+            self.w_e = nn.Linear(embed_size, 1)         # encoder word context
+            self.w_f = nn.Linear(field_input_size, 1)   # encoder field context
+            self.w_d = nn.Linear(hidden_size, 1)        # decoder hidden state
+            self.w_y = nn.Linear(embed_size,  1)        # decoder input word embedding
 
     def _pos_self_attn(self, enc_pos, enc_hidden, enc_input, enc_field, enc_mask):
         """ compute the self-attentive encoder output and field encodings"""
@@ -343,6 +344,7 @@ class DecoderRNN(BaseRNN):
                                                           enc_hidden_keys, enc_input_keys, enc_field_keys, attn_type)
 
     def _get_contexts(self, attn_scores, enc_hidden_vals, enc_input_vals, enc_field_vals):
+        enc_context_proj = None
         if self.attn_level == 3:
             enc_hidden_context = attn_scores[0].unsqueeze(1).bmm(enc_hidden_vals).squeeze(1)
             enc_input_context = attn_scores[1].unsqueeze(1).bmm(enc_input_vals).squeeze(1)
@@ -354,23 +356,29 @@ class DecoderRNN(BaseRNN):
                 enc_output_context = torch.cat((enc_output_context, enc_field_context), 1)
 
             # p_gen
-            enc_context_proj = self.w_r(enc_hidden_context) + self.w_e(enc_input_context) + self.w_f(enc_field_context)
+            if self.decoder_type == 'pg':
+                enc_context_proj = self.w_r(enc_hidden_context) + \
+                                   self.w_e(enc_input_context) + \
+                                   self.w_f(enc_field_context)
 
         elif self.attn_level == 2:
             if self.attn_src == 'emb':
                 # output
                 enc_output_context = attn_scores[0].unsqueeze(1).bmm(enc_input_vals).squeeze(1)
                 # p_gen
-                enc_context_proj = self.w_e(enc_output_context)
+                if self.decoder_type == 'pg':
+                    enc_context_proj = self.w_e(enc_output_context)
 
             elif self.attn_src == 'rnn':
                 # output
                 enc_output_context = attn_scores[0].unsqueeze(1).bmm(enc_hidden_vals).squeeze(1)
                 # p_gen
-                enc_context_proj = self.w_r(enc_output_context)
+                if self.decoder_type == 'pg':
+                    enc_context_proj = self.w_r(enc_output_context)
 
             enc_field_context = attn_scores[2].unsqueeze(1).bmm(enc_field_vals).squeeze(1)
-            enc_context_proj += self.w_f(enc_field_context)
+            if self.decoder_type == 'pg':
+                enc_context_proj += self.w_f(enc_field_context)
             if self.field_context:
                 enc_output_context = torch.cat((enc_output_context, enc_field_context), 1)
 
@@ -378,7 +386,8 @@ class DecoderRNN(BaseRNN):
             # output
             enc_output_context = attn_scores[0].unsqueeze(1).bmm(enc_hidden_vals).squeeze(1)
             # p_gen
-            enc_context_proj = self.w_r(enc_output_context)
+            if self.decoder_type == 'pg':
+                enc_context_proj = self.w_r(enc_output_context)
 
         return enc_output_context, enc_context_proj
 
@@ -407,44 +416,48 @@ class DecoderRNN(BaseRNN):
         p_vocab = F.softmax(out_vec, dim=1)
         # print('p_vocab: {}'.format(p_vocab.size()))
 
-        if self.cov_in_pgen:
-            # print('coverage: {}'.format(coverage))
-            cov_mean = coverage.mean(dim=-1, keepdim=True)
-            # print('cov_mean: {}'.format(cov_mean))
-            enc_context_proj += cov_mean
-        p_gen_logits = enc_context_proj + self.w_d(dec_hidden) + self.w_y(decoder_input)
-        # print('p_gen_logits: {}'.format(p_gen_logits.size()))
-        p_gen = torch.sigmoid(p_gen_logits).view(-1, 1)
-        # print('p_gen: {}'.format(p_gen.size()))
-
-        weighted_Pvocab = p_vocab * p_gen
-        # print('weighted_Pvocab: {}'.format(weighted_Pvocab.size()))
-
         attn_weights = attn_scores[0]
-        # print('attn_weights: {}'.format(attn_weights.size()))
 
-        weighted_attn = (1-p_gen) * attn_weights
-        # print('weighted_attn: {}'.format(weighted_attn.size()))
+        if self.decoder_type == 'pg':
+            if self.cov_in_pgen:
+                # print('coverage: {}'.format(coverage))
+                cov_mean = coverage.mean(dim=-1, keepdim=True)
+                # print('cov_mean: {}'.format(cov_mean))
+                enc_context_proj += cov_mean
+            p_gen_logits = enc_context_proj + self.w_d(dec_hidden) + self.w_y(decoder_input)
+            # print('p_gen_logits: {}'.format(p_gen_logits.size()))
+            p_gen = torch.sigmoid(p_gen_logits).view(-1, 1)
+            # print('p_gen: {}'.format(p_gen.size()))
 
-        # print('max_source_oov: {}'.format(max_source_oov))
-        if max_source_oov > 0:
-            # create OOV (but in-article) zero vectors
-            ext_vocab = torch.zeros(batch_size, max_source_oov)
-            if self.use_cuda:
-                ext_vocab=ext_vocab.cuda()
-            # print('ext_vocab: {}'.format(ext_vocab.size()))
-            combined_vocab = torch.cat((weighted_Pvocab, ext_vocab), 1)
-            del ext_vocab
-        else:
-            combined_vocab = weighted_Pvocab
-        del weighted_Pvocab       # 'Recheck OOV indexes!'
+            weighted_Pvocab = p_vocab * p_gen
+            # print('weighted_Pvocab: {}'.format(weighted_Pvocab.size()))
 
-        # scatter article word probs to combined vocab prob.
-        src_prob = combined_vocab.gather(1, input_ids)
-        combined_vocab = combined_vocab.scatter_add(1, input_ids, weighted_attn)
-        # print('combined_vocab: {}'.format(combined_vocab.size()))
+            # print('attn_weights: {}'.format(attn_weights.size()))
 
-        return combined_vocab, attn_weights, (p_gen, src_prob)
+            weighted_attn = (1-p_gen) * attn_weights
+            # print('weighted_attn: {}'.format(weighted_attn.size()))
+
+            # print('max_source_oov: {}'.format(max_source_oov))
+            if max_source_oov > 0:
+                # create OOV (but in-article) zero vectors
+                ext_vocab = torch.zeros(batch_size, max_source_oov)
+                if self.use_cuda:
+                    ext_vocab=ext_vocab.cuda()
+                # print('ext_vocab: {}'.format(ext_vocab.size()))
+                combined_vocab = torch.cat((weighted_Pvocab, ext_vocab), 1)
+                del ext_vocab
+            else:
+                combined_vocab = weighted_Pvocab
+            del weighted_Pvocab       # 'Recheck OOV indexes!'
+
+            # scatter article word probs to combined vocab prob.
+            src_prob = combined_vocab.gather(1, input_ids)
+            combined_vocab = combined_vocab.scatter_add(1, input_ids, weighted_attn)
+            # print('combined_vocab: {}'.format(combined_vocab.size()))
+            return combined_vocab, attn_weights, (p_gen, src_prob)
+
+        elif self.decoder_type == 'seq':
+            return p_vocab, attn_weights, (None, None)
 
     def forward(self, max_source_oov=0, targets=None, targets_id=None, input_ids=None,
                 enc_hidden=None, enc_input=None, enc_state=None, enc_mask=None, enc_field=None, enc_pos=None,
@@ -542,8 +555,8 @@ class DecoderRNN(BaseRNN):
         finished = np.array([False] * batch_size)
         losses = []
         decoded_outputs = []
-        src_probs = []
-        p_gens = []
+        src_probs = [] if self.decoder_type == 'pg' else None
+        p_gens = [] if self.decoder_type == 'pg' else None
         if fig:
             attn = []
         decoder_input = self.embedding(targets)
@@ -580,10 +593,11 @@ class DecoderRNN(BaseRNN):
                 update_idx = ((lengths > step) & eos_batch) != 0
                 lengths[update_idx] = len(decoded_outputs)
             # replace oov with the corresponding field embedding
-            for i in range(symbols.size(0)):
-                w2f = w2fs[i]
-                if symbols[i].item() > self.vocab_size-1:
-                    symbols[i] = w2f[symbols[i].item()]
+            if self.decoder_type == 'pg':
+                for i in range(symbols.size(0)):
+                    w2f = w2fs[i]
+                    if symbols[i].item() > self.vocab_size-1:
+                        symbols[i] = w2f[symbols[i].item()]
             # symbols.masked_fill_((symbols > self.vocab_size-1), self.unk_id)
             decoder_input = self.embedding(symbols)
             decoder_hidden_init = _c
@@ -598,8 +612,9 @@ class DecoderRNN(BaseRNN):
             batch_loss = nll * target_mask_step.float()
             losses.append(batch_loss.mean().item())
 
-            p_gens.append(p_gen)
-            src_probs.append(src_prob)
+            if self.decoder_type == 'pg':
+                p_gens.append(p_gen)
+                src_probs.append(src_prob)
 
             # check if all samples finished at the eos token
             finished_step = np.logical_not(np.array(target_mask_step.view(-1), dtype=bool))
@@ -607,7 +622,8 @@ class DecoderRNN(BaseRNN):
             # stop if all finished
             if all(finished): break
 
-        p_gens = torch.stack(p_gens, 1).squeeze(2)
+        if self.decoder_type == 'pg':
+            p_gens = torch.stack(p_gens, 1).squeeze(2)
 
         if fig:
             self_matrix = f_matrix if self.field_self_att else None

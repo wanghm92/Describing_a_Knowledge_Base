@@ -7,12 +7,14 @@ from matplotlib.backends.backend_pdf import PdfPages
 from tqdm import tqdm
 
 class Predictor(object):
-    def __init__(self, model, vocab, USE_CUDA):
+    def __init__(self, model, vocab, USE_CUDA, decoder_type='pg', unk_gen='False'):
         device = torch.device("cuda" if USE_CUDA else "cpu")
         self.model = model.to(device)
         self.model.eval()
         self.vocab = vocab
         self.USE_CUDA = USE_CUDA
+        self.decoder_type = decoder_type
+        self.unk_gen = unk_gen
 
     def predict(self, batch_s, batch_o_s, batch_f, batch_pf, batch_pb, max_source_oov, source_len, list_oovs, w2fs):
         torch.set_grad_enabled(False)
@@ -34,8 +36,8 @@ class Predictor(object):
         torch.set_grad_enabled(False)
         refs = {}
         cands = {}
-        cands_with_pgens = {}
-        cands_with_unks = {}
+        cands_with_pgens = {} if self.decoder_type == 'pg' else None
+        cands_with_unks = {} if self.unk_gen else None
         srcs = {}
         fds = {}
         i = 0
@@ -61,7 +63,7 @@ class Predictor(object):
                     # get tokens and replace OOVs
                     symbol = decouts[j][k].item()
                     if symbol < self.vocab.size:
-                        if symbol == 1:
+                        if symbol == 1 and self.unk_gen:
                             replacement = sources[j][attns[j][k].argmax()]
                             out_seq_clean.append(replacement)
                         else:
@@ -72,30 +74,37 @@ class Predictor(object):
                         out_seq_clean.append(oov)
                         out_seq_unk.append(oov)
 
-                out, out_unk, out_with_gens = self.post_process(out_seq_clean, out_seq_unk, p_gens[j])
+                pgen = p_gens[j] if p_gens is not None else None
+                out, out_unk, out_with_gens = self.post_process(out_seq_clean, out_seq_unk, pgen)
+
                 if fig and len(out) > 0 and j < figs_per_batch:
                     fmatrix = selfatt[j] if selfatt is not None else None
                     self.make_figure(lens[j], out, fmatrix, attns[j], batch_pf[j], sources[j], batch_idx+j, save_dir)
                 cands[i] = ' '.join(out)
-                cands_with_pgens[i] = ' '.join(out_with_gens)
-                cands_with_unks[i] = ' '.join(out_unk)
+                if self.decoder_type == 'pg':
+                    cands_with_pgens[i] = ' '.join(out_with_gens)
+                if self.unk_gen:
+                    cands_with_unks[i] = ' '.join(out_unk)
 
         return cands, refs, eval_loss/total_batches, (cands_with_unks, cands_with_pgens, srcs, fds)
 
-    def post_process(self, sentence, sentence_unk, p_gens=None):
+    def post_process(self, sentence, sentence_unk, pgen=None):
         try:
             eos = sentence.index('<EOS>')
             sentence = sentence[:eos]
             sentence_unk = sentence_unk[:eos]
-            if p_gens is not None:
-                p_gens = p_gens[:eos]
+            if pgen is not None:
+                pgen = pgen[:eos]
         except ValueError:
             pass
 
-        if p_gens is None:
-            return [x for x in sentence if x != '<PAD>' and x != '<EOS>' and x != '<SOS>'], [], []
+        if pgen is None:
+            sentence_trim = [x for x in sentence if x != '<PAD>' and x != '<EOS>' and x != '<SOS>']
+            sentence_unk_trim = [x for x in sentence_unk if x != '<PAD>' and x != '<EOS>' and x != '<SOS>']
+            return sentence_trim, sentence_unk_trim, []
         else:
-            token_pgens = [(x, y, z.item()) for x, y, z in zip(sentence, sentence_unk, p_gens) if x != '<PAD>' and x != '<EOS>' and x != '<SOS>']
+            token_pgens = [(x, y, z.item()) for x, y, z in zip(sentence, sentence_unk, pgen)
+                           if x != '<PAD>' and x != '<EOS>' and x != '<SOS>']
             if len(token_pgens) > 0:
                 out, out_unk, pgens_filtered = zip(*token_pgens)
                 pgens_filtered = ["_%.3f"%x if x < 0.7 else '' for x in pgens_filtered]

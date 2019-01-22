@@ -28,6 +28,8 @@ parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
 parser.add_argument('--cuda', action='store_false',
                     help='use CUDA')
+parser.add_argument('--dec_type', type=str, default='pg', choices=['pg', 'pt', 'seq'],
+                    help='decoder model type pg(pointer-generator)/pt(pointer-net)(WIP)/seq(seq2seq)')
 parser.add_argument('--save', type=str, default='params.pkl',
                     help='path to save the final model')
 parser.add_argument('--dataset', type=str, default='test', choices=['test', 'valid'],
@@ -178,7 +180,7 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         for idx, batch_idx in enumerate(batch_indices):
             loss, num_examples = train_batch(t_dataset, batch_idx, model, teacher_forcing_ratio)
             epoch_loss += loss * num_examples
-            if idx%10 == 0:
+            if idx%1 == 0:
                 end_time = time.time()
                 sys.stdout.write('%d batches trained. current batch loss: %f [%.3fs]\r' % (idx, loss, end_time-start_time))
                 sys.stdout.flush()
@@ -188,7 +190,7 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         writer.add_scalar('loss/epoch_loss', epoch_loss, epoch)
 
         # --------------------------------------- inference -------------------------------------------- #
-        predictor = Predictor(model, v_dataset.vocab, args.cuda)
+        predictor = Predictor(model, v_dataset.vocab, args.cuda, decoder_type=args.dec_type, unk_gen=config.unk_gen)
         L.info("Start Evaluating ...")
         cand, ref, eval_loss, others = predictor.preeval_batch(v_dataset)
         cands_with_unks, cands_with_pgens, srcs, fds = others
@@ -199,22 +201,25 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         L.info('\ncand[1]: {}'.format(cand[1]))
         L.info('\nsource[1]: {}'.format(srcs[1]))
         L.info('\nfield[1]: {}'.format(fds[1]))
-        L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
-        L.info('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
+        if config.unk_gen:
+            L.info('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
+        if cands_with_pgens is not None:
+            L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
 
         eval_file_out = "{}/evaluations/valid.epoch_{}.cand.live.txt".format(save_file_dir, epoch)
         with open(eval_file_out, 'w+') as fout:
             for c in range(len(cand)):
                 fout.write("{}\n".format(cand[c+1]))
-        eval_file_out_pgen = "{}/evaluations/valid.epoch_{}.cand.pgen.txt".format(save_file_dir, epoch)
-        with open(eval_file_out_pgen, 'w+') as fout:
-            for c in range(len(cands_with_pgens)):
-                fout.write("{}\n".format(cands_with_pgens[c + 1]))
-        eval_file_out_unk = "{}/evaluations/valid.epoch_{}.cand.unk.txt".format(save_file_dir, epoch)
-        with open(eval_file_out_unk, 'w+') as fout:
-            for c in range(len(cands_with_unks)):
-                fout.write("{}\n".format(cands_with_unks[c + 1]))
-
+        if config.unk_gen:
+            eval_file_out_unk = "{}/evaluations/valid.epoch_{}.cand.unk.txt".format(save_file_dir, epoch)
+            with open(eval_file_out_unk, 'w+') as fout:
+                for c in range(len(cands_with_unks)):
+                    fout.write("{}\n".format(cands_with_unks[c + 1]))
+        if cands_with_pgens is not None:
+            eval_file_out_pgen = "{}/evaluations/valid.epoch_{}.cand.pgen.txt".format(save_file_dir, epoch)
+            with open(eval_file_out_pgen, 'w+') as fout:
+                for c in range(len(cands_with_pgens)):
+                    fout.write("{}\n".format(cands_with_pgens[c + 1]))
 
         # --------------------------------------- evaluation -------------------------------------------- #
         final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=epoch)
@@ -246,7 +251,7 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
             L.info("model at epoch #{} saved".format(epoch))
             torch.save(model.state_dict(), "{}{}.{}".format(save_prefix, suffix, epoch))
 
-        # epoch_score = 2*rouge_l*bleu_4/(rouge_l + bleu_4)
+            # epoch_score = 2*rouge_l*bleu_4/(rouge_l + bleu_4)
 
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------------- Main ------------------------------------------------- #
@@ -283,7 +288,7 @@ if __name__ == "__main__":
                          rnn_cell=config.cell, directions=config.directions,
                          variable_lengths=True, field_concat_pos=args.field_concat_pos,
                          field_embedding=field_embedding)
-    decoder = DecoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding,
+    decoder = DecoderRNN(dec_type=args.dec_type, vocab_size=t_dataset.vocab.size, embedding=embedding,
                          embed_size=config.emsize, hidden_size=hidden_size, fdsize=fd_size, pemsize=config.pemsize,
                          sos_id=3, eos_id=2, unk_id=1,
                          rnn_cell=config.cell, directions=config.directions,
@@ -340,7 +345,7 @@ if __name__ == "__main__":
 
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
         L.info("Read $-{}-$ data".format(args.dataset))
-        predictor = Predictor(model, dataset.vocab, args.cuda)
+        predictor = Predictor(model, dataset.vocab, args.cuda, decoder_type=args.dec_type, unk_gen=config.unk_gen)
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
@@ -352,8 +357,10 @@ if __name__ == "__main__":
         L.info('\ncand[1]: {}'.format(cand[1]))
         L.info('\nsource[1]: {}'.format(srcs[1]))
         L.info('\nfield[1]: {}'.format(fds[1]))
-        L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
-        L.info('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
+        if config.unk_gen:
+            L.info('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
+        if cands_with_pgens is not None:
+            L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
 
     # ----------------------------------- evaluation ---------------------------------------- #
     elif args.mode == 2:
@@ -363,7 +370,7 @@ if __name__ == "__main__":
 
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
         L.info("Read $-{}-$ data".format(args.dataset))
-        predictor = Predictor(model, dataset.vocab, args.cuda)
+        predictor = Predictor(model, dataset.vocab, args.cuda, decoder_type=args.dec_type, unk_gen=config.unk_gen)
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
@@ -375,23 +382,27 @@ if __name__ == "__main__":
         L.info('\ncand[1]: {}'.format(cand[1]))
         L.info('\nsource[1]: {}'.format(srcs[1]))
         L.info('\nfield[1]: {}'.format(fds[1]))
-        L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
-        L.info('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
+        if config.unk_gen:
+            L.info('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
+        if cands_with_pgens is not None:
+            L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
 
         cand_file_out = "{}/evaluations/{}.epoch_{}.cand.txt".format(save_file_dir, args.dataset, load_epoch)
         with open(cand_file_out, 'w+') as fout:
             for c in range(len(cand)):
                 fout.write("{}\n".format(cand[c+1]))
 
-        cand_pgen_file_out = "{}/evaluations/{}.epoch_{}.cand.pgen.txt".format(save_file_dir, args.dataset, load_epoch)
-        with open(cand_pgen_file_out, 'w+') as fout:
-            for c in range(len(cands_with_pgens)):
-                fout.write("{}\n".format(cands_with_pgens[c+1]))
+        if cands_with_pgens is not None:
+            cand_pgen_file_out = "{}/evaluations/{}.epoch_{}.cand.pgen.txt".format(save_file_dir, args.dataset, load_epoch)
+            with open(cand_pgen_file_out, 'w+') as fout:
+                for c in range(len(cands_with_pgens)):
+                    fout.write("{}\n".format(cands_with_pgens[c+1]))
 
-        cand_unk_file_out = "{}/evaluations/{}.epoch_{}.cand.unk.txt".format(save_file_dir, args.dataset, load_epoch)
-        with open(cand_unk_file_out, 'w+') as fout:
-            for c in range(len(cands_with_unks)):
-                fout.write("{}\n".format(cands_with_unks[c+1]))
+        if config.unk_gen:
+            cand_unk_file_out = "{}/evaluations/{}.epoch_{}.cand.unk.txt".format(save_file_dir, args.dataset, load_epoch)
+            with open(cand_unk_file_out, 'w+') as fout:
+                for c in range(len(cands_with_unks)):
+                    fout.write("{}\n".format(cands_with_unks[c+1]))
 
         ref_file_out = "{}/evaluations/{}.ref.sum.txt".format(save_file_dir, args.dataset)
         with open(ref_file_out, 'w+') as fout:
@@ -419,7 +430,7 @@ if __name__ == "__main__":
 
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=1)
         L.info("Read $-{}-$ data".format(args.dataset))
-        predictor = Predictor(model, dataset.vocab, args.cuda)
+        predictor = Predictor(model, dataset.vocab, args.cuda, decoder_type=args.dec_type, unk_gen=config.unk_gen)
 
         while True:
             seq_str = input("Type index from (%d to %d) to continue:\n" %(0, dataset.len - 1))
