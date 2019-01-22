@@ -1,5 +1,5 @@
 import torch
-import sys
+import sys, os
 import matplotlib.pyplot as plt
 plt.switch_backend('Agg')  #TkAgg
 import matplotlib.ticker as ticker
@@ -30,7 +30,7 @@ class Predictor(object):
         print(len(output))
         return ' '.join([i for i in output if i != '<PAD>' and i != '<EOS>' and i != '<SOS>'])
 
-    def preeval_batch(self, dataset):
+    def preeval_batch(self, dataset, fig=False, save_file_dir=None):
         torch.set_grad_enabled(False)
         refs = {}
         cands = {}
@@ -39,31 +39,34 @@ class Predictor(object):
         fds = {}
         i = 0
         eval_loss = 0
+        figs_per_batch = 1
         total_batches = len(dataset.corpus)
         print("{} batches to be evaluated".format(total_batches))
         for batch_idx in tqdm(range(total_batches)):
             batch_s, batch_o_s, batch_f, batch_pf, batch_pb, sources, targets, fields, list_oovs, source_len, \
                 max_source_oov, w2fs = dataset.get_batch(batch_idx)
-            decoded_outputs, lengths, losses, p_gens = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
-                                                                  w2fs=w2fs, input_lengths=source_len,
-                                                                  max_source_oov=max_source_oov)
+            decouts, lens, losses, p_gens, selfatt, attns = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
+                                                                       w2fs=w2fs, input_lengths=source_len,
+                                                                       max_source_oov=max_source_oov, fig=True)
             eval_loss += sum(losses)/len(losses)
-            for j in range(len(lengths)):
+            for j in range(len(lens)):
                 i += 1
                 srcs[i] = ' '.join(['_'.join(x.split()) for x in sources[j]])
                 fds[i] = ' '.join(fields[j])
                 refs[i] = [' '.join(targets[j])]
                 out_seq = []
-                for k in range(lengths[j]):
+                for k in range(lens[j]):
                     # get tokens and replace OOVs
-                    symbol = decoded_outputs[j][k].item()
+                    symbol = decouts[j][k].item()
                     if symbol < self.vocab.size:
                         out_seq.append(self.vocab.idx2word[symbol])
                     else:
                         out_seq.append(list_oovs[j][symbol-self.vocab.size])
                 out, out_with_gens = self.post_process(out_seq, p_gens[j])
-                cands[i] = out
-                cands_with_pgens[i] = out_with_gens
+                if fig and len(out) > 0 and j < figs_per_batch:
+                    self.make_figure(lens[j], out, selfatt[j], attns[j], batch_pf[j], sources[j], batch_idx+j, save_file_dir)
+                cands[i] = ' '.join(out)
+                cands_with_pgens[i] = ' '.join(out_with_gens)
 
         return cands, refs, eval_loss/total_batches, (cands_with_pgens, srcs, fds)
 
@@ -84,117 +87,41 @@ class Predictor(object):
                 out, pgens_filtered = zip(*token_pgens)
                 pgens_filtered = ["_%.3f"%x if x < 0.7 else '' for x in pgens_filtered]
                 out_with_gens = ["{}{}".format('_'.join(x.split()), y) for x, y in zip(out, pgens_filtered)]
-                return ' '.join(out), ' '.join(out_with_gens)
+                return list(out), out_with_gens
             else:
-                return '', ''
+                return [], []
 
-    def showAttention(self, input_words, output_words, attentions, name, type):
+    def showAttention(self, input_words, output_words, attentions, attn='self', xlabel="", ylabel="", idx=0, dir=''):
         # Set up figure with colorbar
-        # pp = PdfPages(name)
         plt.rcParams.update({'font.size': 18})
-        plt.rcParams["font.family"] = "Times New Roman"
         fig = plt.figure()
         ax = fig.add_subplot(111)
         cax = ax.matshow(attentions.numpy(), cmap=plt.cm.Blues)
-        if type == 1:
-            fig.colorbar(cax, shrink=0.7, pad=0.03)
-        else:
+        if attn == 'self':
             fig.colorbar(cax, pad=0.03)
+        else:
+            fig.colorbar(cax, shrink=0.7, pad=0.03)
 
         # Set up axes
         ax.set_xticklabels([''] + input_words, rotation=90)
         ax.set_yticklabels([''] + output_words)
-        if type == 0:
-            ax.set_xlabel("Table Position")
-            ax.set_ylabel("Table Position")
-        else:
-            ax.set_xlabel("Structured KB")
-            ax.set_ylabel("Output")
-
-        # ax.set_xticklabels([''] + input.split(' ') +
-        #                    ['<EOS>'], rotation=90)
-        # ax.set_yticklabels(output_words)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
 
         # Show label at every tick
         ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
         ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
-        # plt.show()
-        fig.savefig(name, bbox_inches='tight')
+        fig.savefig(os.path.join(dir, "attention_figures/{}.{}.png".format(attn, idx)), bbox_inches='tight')
         plt.close(fig)
 
-    def figure(self, batch_s, batch_o_s, batch_f, batch_pf, batch_pb, max_source_oov, source_len, list_oovs, w2fs, type,
-               visual):
-        torch.set_grad_enabled(False)
-        decoded_outputs, lengths, self_matrix, soft = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
-                                                                 input_lengths=source_len,
-                                                                 max_source_oov=max_source_oov,
-                                                                 w2fs=w2fs, fig=True)
-        length = lengths[0]
-        output = []
-        # print(decoded_outputs)
-        for i in range(length):
-            symbol = decoded_outputs[0][i].item()
-            if symbol < self.vocab.size:
-                output.append(self.vocab.idx2word[symbol])
-            else:
-                output.append(list_oovs[symbol-self.vocab.size])
-        output = [i for i in output if i != '<PAD>' and i != '<EOS>' and i != '<SOS>']
-        if self_matrix is not None:
-            print(self_matrix.size(), soft.size())
-        else:
-            print("position self attention is *** NOT *** available")
-        pos = [str(i) for i in batch_pf[0].cpu().tolist()]
+    def make_figure(self, length, out, selfatt, attns, batch_pf, src_words, idx, savedir):
+        pos = [str(i) for i in batch_pf.cpu().tolist() if i >0]
         combine = []
         for j in range(len(pos)):
-            combine.append(visual[j] + " : " + pos[j])
-        if self_matrix is not None:
-            self.showAttention(pos, combine, self_matrix.cpu(), 'self.png', 0)
-        self.showAttention(type, output[19:25], soft[19:25].cpu(), 'type.png', 1)
-        # return output
+            combine.append(src_words[j] + " : " + pos[j])
 
-    # def overlap(self, line):
-    #     indexref = []
-    #     indexoutput = []
-    #     for word in line['sources']:
-    #         index = [i for i, j in enumerate(line['ref']) if j.lower() == word.lower()]
-    #         indexref.append(index)
-    #         index = [i for i, j in enumerate(line['output']) if j.lower() == word.lower()]
-    #         indexoutput.append(index)
-    #     line['indexref'] = indexref
-    #     line['indexoutput'] = indexoutput
-    #     new_table = []
-    #     for field in line['fields']:
-    #         new_table.append(field[field.find('<') + 1:field.find('>')])
-    #     line['fields'] = new_table
-    #
-    # def predict_file(self, dataset):
-    #     torch.set_grad_enabled(False)
-    #     lines = []
-    #     total_batches = len(dataset.corpus)
-    #     print("{} batches to be evaluated".format(total_batches))
-    #     for batch_idx in tqdm(range(total_batches)):
-    #         batch_s, batch_o_s, batch_f, batch_pf, batch_pb, sources, targets, fields, list_oovs, source_len, \
-    #         max_source_oov, w2fs = dataset.get_batch(batch_idx)
-    #         decoded_outputs, lengths = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
-    #                                               input_lengths=source_len, max_source_oov=max_source_oov,
-    #                                               w2fs=w2fs)
-    #         pos = batch_pf.tolist()
-    #         for j in range(len(lengths)):
-    #             line = {}
-    #             line['sources'] = sources[j]
-    #             line['fields'] = fields[j]
-    #             line['ref'] = targets[j]
-    #             line['pos'] = [p for p in pos[j] if p != 0]
-    #             out_seq = []
-    #             for k in range(lengths[j]):
-    #                 symbol = decoded_outputs[j][k].item()
-    #                 if symbol < self.vocab.size:
-    #                     out_seq.append(self.vocab.idx2word[symbol])
-    #                 else:
-    #                     out_seq.append(list_oovs[j][symbol - self.vocab.size])
-    #             out = self.post_process(out_seq)
-    #             line['output'] = out
-    #             self.overlap(line)
-    #             lines.append(str(line) + '\n')
-    #
-    #     return lines
+        if selfatt is not None:
+            self.showAttention(pos, combine, selfatt.cpu(),
+                               attn='self', xlabel='Table Position', ylabel='Table Position', idx=idx, dir=savedir)
+        self.showAttention(combine, out, attns[:len(out)].cpu(),
+                           attn='attn', xlabel='Structured KB', ylabel='Text Output', idx=idx, dir=savedir)

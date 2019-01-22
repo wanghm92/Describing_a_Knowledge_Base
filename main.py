@@ -96,6 +96,8 @@ if not os.path.exists(save_file_dir):
     os.mkdir(save_file_dir)
     if not os.path.exists(os.path.join(save_file_dir, "evaluations")):
         os.mkdir(os.path.join(save_file_dir, "evaluations"))
+    if not os.path.exists(os.path.join(save_file_dir, "attention_figures")):
+        os.mkdir(os.path.join(save_file_dir, "attention_figures"))
 
 # -------------------------------- Hyperparams and Tensorboard ------------------------------------ #
 if args.type == 2:
@@ -333,7 +335,7 @@ if __name__ == "__main__":
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
-        cand, ref, eval_loss, others = predictor.preeval_batch
+        cand, ref, eval_loss, others = predictor.preeval_batch(dataset)
         cands_with_pgens, srcs, fds = others
         L.info('Result:')
         L.info('eval_loss: {}'.format(eval_loss))
@@ -355,7 +357,7 @@ if __name__ == "__main__":
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
-        cand, ref, eval_loss, others = predictor.preeval_batch(dataset)
+        cand, ref, eval_loss, others = predictor.preeval_batch(dataset, fig=True, save_file_dir=save_file_dir)
         cands_with_pgens, srcs, fds = others
         L.info('Result:')
         L.info('eval_loss: {}'.format(eval_loss))

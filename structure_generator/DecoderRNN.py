@@ -611,9 +611,9 @@ class DecoderRNN(BaseRNN):
         p_gens = torch.stack(p_gens, 1).squeeze(2)
 
         if fig:
-            self_matrix = f_matrix[0] if self.field_self_att else None
+            self_matrix = f_matrix if self.field_self_att else None
             return torch.stack(decoded_outputs, 1).squeeze(2), lengths.tolist(), losses, p_gens, self_matrix, \
-                   torch.stack(attn, 1).squeeze(2)[0]
+                   torch.stack(attn, 1).squeeze(2)
         else:
             return torch.stack(decoded_outputs, 1).squeeze(2), lengths.tolist(), losses, p_gens
 
