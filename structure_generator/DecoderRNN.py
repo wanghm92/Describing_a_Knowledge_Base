@@ -124,14 +124,14 @@ class DecoderRNN(BaseRNN):
         if self.decoder_type != 'pt':
             output_layer_input_size = 0  # decoder state size
             if self.attn_level == 3:
-                output_layer_input_size += (hidden_size + embed_size)
+                output_layer_input_size += (enc_hidden_size + embed_size)
                 if self.field_context:
                     output_layer_input_size += field_input_size
             elif self.attn_level == 2:
                 if self.field_context:
                     output_layer_input_size += field_input_size
                 if self.attn_src == 'emb':
-                    output_layer_input_size += hidden_size
+                    output_layer_input_size += embed_size
                 elif self.attn_src == 'rnn':
                     output_layer_input_size += enc_hidden_size
             else:
