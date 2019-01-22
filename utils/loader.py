@@ -110,9 +110,11 @@ class Vocabulary:
 
 
 class Table2text_seq:
-    def __init__(self, data_src, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available(), train_mode=0):
+    def __init__(self, data_src, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available(),
+                 train_mode=0, dec_type='pg'):
         prefix = "{}/table2text_nlg/data/dkb/".format(HOME)
         self.type = type
+        self.dec_type =dec_type
         self.vocab = None
         self.text_len = 0
         self.max_p = 0

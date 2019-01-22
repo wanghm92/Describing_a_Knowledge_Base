@@ -109,7 +109,6 @@ else:
     config = Config()
     from utils.loader import Table2text_seq
 
-config.batch_size = args.batch
 # config = ConfigTest()
 print("config is: \n")
 pprint.pprint(vars(config), indent=2)
@@ -262,8 +261,8 @@ if __name__ == "__main__":
     # ------------------------------------- Reading Datasets ------------------------------------------- #
     # -------------------------------------------------------------------------------------------------- #
     L.info("Reading training data ...")
-    t_dataset = Table2text_seq('train', type=args.type, USE_CUDA=args.cuda,
-                               batch_size=config.batch_size, train_mode=args.mode)
+    t_dataset = Table2text_seq('train', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size,
+                               train_mode=args.mode, dec_type=args.dec_type)
 
     # -------------------------------------------------------------------------------------------------- #
     # -------------------------------------- Building Model -------------------------------------------- #
@@ -312,7 +311,8 @@ if __name__ == "__main__":
         try:
             L.info("number of training examples: %d" % t_dataset.len)
             L.info("Reading valid data ...")
-            v_dataset = Table2text_seq('valid', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
+            v_dataset = Table2text_seq('valid', type=args.type, USE_CUDA=args.cuda,
+                                       batch_size=config.batch_size, dec_type=args.dec_type)
 
             L.info("start training...")
             train_epoches(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1)
@@ -333,7 +333,8 @@ if __name__ == "__main__":
         try:
             L.info("number of training examples: %d" % t_dataset.len)
             L.info("Reading valid data ...")
-            v_dataset = Table2text_seq('valid', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
+            v_dataset = Table2text_seq('valid', type=args.type, USE_CUDA=args.cuda,
+                                       batch_size=config.batch_size, dec_type=args.dec_type)
 
             L.info("start training...")
             train_epoches(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1, load_epoch=load_epoch)
@@ -343,7 +344,8 @@ if __name__ == "__main__":
             L.info('Exiting from training early')
             writer.close()
 
-        dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
+        dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda,
+                                 batch_size=config.batch_size, dec_type=args.dec_type)
         L.info("Read $-{}-$ data".format(args.dataset))
         predictor = Predictor(model, dataset.vocab, args.cuda, decoder_type=args.dec_type, unk_gen=config.unk_gen)
         L.info("number of test examples: %d" % dataset.len)
@@ -368,7 +370,8 @@ if __name__ == "__main__":
         load_epoch = int(args.save.split('.')[-1])
         L.info("model restored from epoch-{}: {}".format(load_epoch, args.save))
 
-        dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size)
+        dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda,
+                                 batch_size=config.batch_size, dec_type=args.dec_type)
         L.info("Read $-{}-$ data".format(args.dataset))
         predictor = Predictor(model, dataset.vocab, args.cuda, decoder_type=args.dec_type, unk_gen=config.unk_gen)
         L.info("number of test examples: %d" % dataset.len)
@@ -428,7 +431,7 @@ if __name__ == "__main__":
         load_epoch = int(args.save.split('.')[-1])
         L.info("model restored from epoch-{}: {}".format(load_epoch, args.save))
 
-        dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=1)
+        dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=1, dec_type=args.dec_type)
         L.info("Read $-{}-$ data".format(args.dataset))
         predictor = Predictor(model, dataset.vocab, args.cuda, decoder_type=args.dec_type, unk_gen=config.unk_gen)
 

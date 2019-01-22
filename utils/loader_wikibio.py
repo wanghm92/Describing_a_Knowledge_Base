@@ -8,7 +8,8 @@ from tqdm import tqdm
 class Vocabulary:
     """Vocabulary class for mapping between words and ids"""
     def __init__(self, word2idx=None, idx2word=None, field2idx=None, idx2field=None, field=None, corpus=None,
-                 max_words=20000, min_frequency=5, start_end_tokens=True, min_frequency_field=100):
+                 max_words=20000, min_frequency=5, start_end_tokens=True, min_frequency_field=100, dec_type='pg'):
+        self.dec_type =dec_type
         if corpus is None:
             self.word2idx = word2idx
             self.idx2word = idx2word
@@ -102,15 +103,18 @@ class Vocabulary:
                 _source.append(self.word2idx[word])
             except KeyError:
                 oov_freq += 1
-                if word not in source_oov:
-                    _o_source.append(cnt + self.size)
-                    source_oov[word] = cnt
-                    cnt += 1
+                if self.dec_type == 'pg':
+                    if word not in source_oov:
+                        _o_source.append(cnt + self.size)
+                        source_oov[word] = cnt
+                        cnt += 1
+                    else:
+                        _o_source.append(source_oov[word] + self.size)
                 else:
-                    _o_source.append(source_oov[word] + self.size)
-                # NOTE: use field type embedding for OOV field values
-                _source.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
-                # _source.append(self.word2idx['<UNK>'])
+                    _o_source.append(self.word2idx['<UNK>'])
+                _source.append(self.word2idx['<UNK>'])
+                # use field type embedding for OOV field values
+                # _source.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
         return _o_source, source_oov, _source, oov_freq
 
     def vectorize_target(self, vector, source_oov, table):
@@ -124,22 +128,23 @@ class Vocabulary:
                 oov_freq += 1
                 # NOTE: use UNK for text words not in source OOVs
                 if word not in source_oov:
-                    # print(word)
                     _o_target.append(self.word2idx['<UNK>'])
                     _target.append(self.word2idx['<UNK>'])
                 else:
                     # NOTE: use source_oov idx for OOV text words but appear in source OOVs
                     _o_target.append(source_oov[word] + self.size)
-                    _target.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
-                    # _target.append(self.word2idx['<UNK>'])
+                    _target.append(self.word2idx['<UNK>'])
+                    # _target.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
         return self.add_start_end(_o_target), self.add_start_end(_target), oov_freq
 
 
 class Table2text_seq:
-    def __init__(self, data_src, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available(), train_mode=0):
+    def __init__(self, data_src, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available(),
+                 train_mode=0, dec_type='pg'):
         prefix = "{}/table2text_nlg/data/dkb/wikibio_dataset/".format(HOME)
         assert type == 2
         self.vocab = None
+        self.dec_type =dec_type
         self.text_len = 0
         self.max_p = 0
         self.data_src = data_src
@@ -181,7 +186,8 @@ class Table2text_seq:
         with open(vocab_path_pkl, 'rb') as fin:
             data = pickle.load(fin)
         self.vocab = Vocabulary(word2idx=data["word2idx"], idx2word=data["idx2word"],
-                                field2idx=data["field2idx"], idx2field=data["idx2field"])
+                                field2idx=data["field2idx"], idx2field=data["idx2field"],
+                                dec_type=self.dec_type)
 
         print("Loading data $LIGHT$ from {}".format(path))
         # (qkey, qitem, index)
@@ -252,7 +258,7 @@ class Table2text_seq:
         vocab_path_js = "{}/wikibio_vocab.json".format(prefix)
         if self.data_src == 'train':
             print("saving vocab ...")
-            self.vocab = Vocabulary(corpus=total, field=total_field)
+            self.vocab = Vocabulary(corpus=total, field=total_field, dec_type=self.dec_type)
             data = {
                 "idx2word": self.vocab.idx2word,
                 "word2idx": self.vocab.word2idx,
@@ -268,7 +274,8 @@ class Table2text_seq:
             with open(vocab_path_pkl, 'rb') as fin:
                 data = pickle.load(fin)
             self.vocab = Vocabulary(word2idx=data["word2idx"], idx2word=data["idx2word"],
-                                    field2idx=data["field2idx"], idx2field=data["idx2field"])
+                                    field2idx=data["field2idx"], idx2field=data["idx2field"],
+                                    dec_type=self.dec_type)
         return samples
 
     def batchfy(self):
