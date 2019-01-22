@@ -109,8 +109,8 @@ class Vocabulary:
                 else:
                     _o_source.append(source_oov[word] + self.size)
                 # NOTE: use field type embedding for OOV field values
-                # _source.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
-                _source.append(self.word2idx['<UNK>'])
+                _source.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
+                # _source.append(self.word2idx['<UNK>'])
         return _o_source, source_oov, _source, oov_freq
 
     def vectorize_target(self, vector, source_oov, table):
@@ -130,8 +130,8 @@ class Vocabulary:
                 else:
                     # NOTE: use source_oov idx for OOV text words but appear in source OOVs
                     _o_target.append(source_oov[word] + self.size)
-                    # _target.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
-                    _target.append(self.word2idx['<UNK>'])
+                    _target.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
+                    # _target.append(self.word2idx['<UNK>'])
         return self.add_start_end(_o_target), self.add_start_end(_target), oov_freq
 
 
@@ -335,7 +335,9 @@ class Table2text_seq:
                 max_source_oov = len(source_oov)
             if self.data_src != 'train':
                 idx2word_oov = {idx: word for word, idx in source_oov}
-                w2f = {(idx+self.vocab.size): self.vocab.word2idx['<UNK>'] for word, idx in source_oov}
+                # w2f = {(idx+self.vocab.size): self.vocab.word2idx['<UNK>'] for word, idx in source_oov}
+                w2f = {(idx + self.vocab.size): self.vocab.word2idx.get(table[word], self.vocab.word2idx['<UNK>'])
+                       for word, idx in source_oov}
                 w2fs.append(w2f)
                 list_oovs.append(idx2word_oov)
                 targets.append(target)  # tokens
