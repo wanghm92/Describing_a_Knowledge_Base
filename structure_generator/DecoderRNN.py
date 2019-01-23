@@ -271,7 +271,7 @@ class DecoderRNN(BaseRNN):
         return score, score, score
 
     def _normalize(self, t, mask):
-        t.masked_fill_(mask.data.byte(), sys.float_info.epsilon)  # mask to epsilon before normalization
+        # t.masked_fill_(mask.data.byte(), sys.float_info.epsilon)  # mask to epsilon before normalization
         normalizer = t.sum(dim=-1, keepdim=True).add_(sys.float_info.epsilon)
         return torch.div(t, normalizer)
 
@@ -513,7 +513,6 @@ class DecoderRNN(BaseRNN):
             # step through decoder hidden states
             for step in range(max_length):
                 target_id = targets_id[:, step+1].unsqueeze(1)  # 0th is <SOS>, [batch] of ids of next word
-                # print('target_id: {}'.format(target_id.size()))
 
                 dec_hidden = hidden[:, step, :]
                 decoder_input = decoder_inputs[:, step, :]

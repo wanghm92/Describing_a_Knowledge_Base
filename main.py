@@ -73,6 +73,9 @@ parser.add_argument('--context_mlp', action='store_true',
 parser.add_argument('--shuffle', action='store_false',
                     help='whether to shuffle the batches during each epoch')
 
+parser.add_argument('--fig', action='store_true',
+                    help='generate attention visualization figures for evaluation')
+
 args = parser.parse_args()
 
 # ------------------------------------- checking attn_src -------------------------------------- #
@@ -378,7 +381,7 @@ if __name__ == "__main__":
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
-        cand, ref, eval_loss, others = predictor.preeval_batch(dataset, fig=True, save_dir=save_file_dir)
+        cand, ref, eval_loss, others = predictor.preeval_batch(dataset, fig=args.fig, save_dir=save_file_dir)
         cands_with_unks, cands_with_pgens, srcs, fds = others
         L.info('Result:')
         L.info('eval_loss: {}'.format(eval_loss))
