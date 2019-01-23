@@ -307,15 +307,29 @@ if __name__ == "__main__":
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
 
     L.info("Model parameters: ")
-    params_dict = {name: param.size() for name, param in model.named_parameters() if param.requires_grad}
+    params_dict = {}
     for name, param in model.named_parameters():
         if param.requires_grad:
-            if 'bias' in name:
-                nn.init.constant_(param, 0.0)
-            elif 'weight' in name or 'embedding' in name:
-                nn.init.xavier_uniform_(param)
-    pprint.pprint(params_dict, indent=2)
+            if 'rnn' in name or 'V' in name or 'embedding' in name:
+                if 'bias' in name:
+                    nn.init.constant_(param, 0.0)
+                    params_dict["[Constant-0] {}".format(name)] = param.size()
+                    # print("Constant(0): {}".format(name))
+                else:
+                    nn.init.xavier_uniform_(param)
+                    params_dict["[Xavier] {}".format(name)] = param.size()
+            else:
+                try:
+                    nn.init.xavier_uniform_(param)
+                    params_dict["[Xavier] {}".format(name)] = param.size()
+                except:
+                    if param.size()[0] == 1:
+                        nn.init.constant_(param, 0.0)
+                        params_dict["[Constant-0] {}".format(name)] = param.size()
+                    else:
+                        params_dict["[Uniform: 1/dim*0.5] {}".format(name)] = param.size()
 
+    pprint.pprint(params_dict, indent=2)
     # --------------------------------------- train -------------------------------------------- #
     if args.mode == 0:
         try:
