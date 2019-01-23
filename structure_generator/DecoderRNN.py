@@ -44,6 +44,8 @@ class DecoderRNN(BaseRNN):
         self.embedding = embedding
         self.lmbda = lmbda
         self.use_cuda = use_cuda
+        if self.decoder_type != 'pg':
+            self.criterion = nn.CrossEntropyLoss(reduction='none')
 
         # ----------------- params for rnn cell ----------------- #
         # TODO: input feeding
@@ -426,12 +428,13 @@ class DecoderRNN(BaseRNN):
             out_vec = self.V2(out_vec)
         else:
             out_vec = self.V(torch.cat((dec_hidden, enc_output_context), 1))
-        p_vocab = F.softmax(out_vec, dim=1)
-        # print('p_vocab: {}'.format(p_vocab.size()))
 
         attn_weights = attn_scores[0]
 
         if self.decoder_type == 'pg':
+            p_vocab = F.softmax(out_vec, dim=1)
+            # print('p_vocab: {}'.format(p_vocab.size()))
+
             if self.cov_in_pgen:
                 # print('coverage: {}'.format(coverage))
                 cov_mean = coverage.mean(dim=-1, keepdim=True)
@@ -469,8 +472,9 @@ class DecoderRNN(BaseRNN):
             # print('combined_vocab: {}'.format(combined_vocab.size()))
             return combined_vocab, attn_weights, (p_gen, src_prob)
 
+        # TODO: pointer-net
         elif self.decoder_type == 'seq':
-            return p_vocab, attn_weights, (None, None)
+            return out_vec, attn_weights, (None, None)
 
     def forward(self, max_source_oov=0, targets=None, targets_id=None, input_ids=None,
                 enc_hidden=None, enc_input=None, enc_state=None, enc_mask=None, enc_field=None, enc_pos=None,
@@ -520,28 +524,37 @@ class DecoderRNN(BaseRNN):
                 dec_hidden = hidden[:, step, :]
                 decoder_input = decoder_inputs[:, step, :]
 
-                combined_vocab, attn_weights, _ = self._decode_step(batch_size, input_ids, coverage, max_source_oov,
-                                                                    dec_hidden, decoder_input,
-                                                                    enc_mask, max_enc_len,
-                                                                    enc_hidden_keys, enc_input_keys, enc_field_keys,
-                                                                    enc_hidden_vals, enc_input_vals, enc_field_vals)
-                # mask the output to account for PAD
-                target_mask_0 = target_id.ne(0).detach()
-                output = combined_vocab.gather(1, target_id).add_(sys.float_info.epsilon)
-                # print('output: {}'.format(output.size()))
-                _lm_loss = output.log().mul(-1) * target_mask_0.float()
-                # print('_lm_loss: {}'.format(_lm_loss.size()))
-                lm_loss.append(_lm_loss)
+                logits_or_probs, attn_weights, _ = self._decode_step(batch_size, input_ids, coverage, max_source_oov,
+                                                                     dec_hidden, decoder_input,
+                                                                     enc_mask, max_enc_len,
+                                                                     enc_hidden_keys, enc_input_keys, enc_field_keys,
+                                                                     enc_hidden_vals, enc_input_vals, enc_field_vals)
 
-                if self.use_cov_loss:
-                    coverage = coverage + attn_weights
-                    # coverage_norm = coverage/(step + 1)
-                    # print('coverage: {}'.format(coverage.size()))
-                    # take minimum across both attn_weights and coverage
-                    _cov_loss, _ = torch.stack((coverage, attn_weights), 2).min(2)
-                    # _cov_loss, _ = torch.stack((coverage_norm, attn_weights), 2).min(2)
-                    # print('_cov_loss: {}'.format(_cov_loss.size()))
-                    cov_loss.append(_cov_loss.sum(1))
+                target_mask_0 = target_id.eq(0).detach()
+
+                if self.decoder_type == 'pg':
+                    combined_vocab = logits_or_probs
+                    output = combined_vocab.gather(1, target_id).add_(sys.float_info.epsilon)
+                    # print('output: {}'.format(output.size()))
+                    # mask the loss for PAD
+                    _lm_loss = output.log().mul(-1)
+                    _lm_loss.masked_fill_(target_mask_0.data.byte(), 0)
+
+                    if self.use_cov_loss:
+                        coverage = coverage + attn_weights
+                        # coverage_norm = coverage/(step + 1)
+                        # print('coverage: {}'.format(coverage.size()))
+                        # take minimum across both attn_weights and coverage
+                        _cov_loss, _ = torch.stack((coverage, attn_weights), 2).min(2)
+                        # _cov_loss, _ = torch.stack((coverage_norm, attn_weights), 2).min(2)
+                        # print('_cov_loss: {}'.format(_cov_loss.size()))
+                        cov_loss.append(_cov_loss.sum(1))
+                else:
+                    logits = logits_or_probs
+                    _lm_loss = self.criterion(logits, target_id.squeeze(1))
+                    _lm_loss = _lm_loss.unsqueeze(1)
+
+                lm_loss.append(_lm_loss)
 
             # NOTE: loss is normalized by length, use sum of loss leads to faster conversion
             total_masked_loss = torch.cat(lm_loss, 1).sum(1).div(dec_lens)
