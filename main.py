@@ -273,9 +273,11 @@ if __name__ == "__main__":
     # -------------------------------------------------------------------------------------------------- #
     L.info("Building Model ...")
     embedding = nn.Embedding(t_dataset.vocab.size, config.emsize, padding_idx=0)
+    nn.init.xavier_uniform_(embedding)
     if args.type == 2:
         assert hasattr(t_dataset.vocab, 'field_vocab_size')
         field_embedding = nn.Embedding(t_dataset.vocab.field_vocab_size, config.fdsize, padding_idx=0)
+        nn.init.xavier_uniform_(field_embedding)
         hidden_size = config.hdsize
         fd_size = config.fdsize
     else:

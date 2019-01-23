@@ -34,7 +34,6 @@ class DecoderRNN(BaseRNN):
         self.field_concat_pos = field_concat_pos
         self.field_context = field_context
         self.context_mlp = context_mlp
-        self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)  # TODO: input feeding
         self.output_size = vocab_size
         self.max_length = max_len
         self.eos_id = eos_id
@@ -45,6 +44,15 @@ class DecoderRNN(BaseRNN):
         self.embedding = embedding
         self.lmbda = lmbda
         self.use_cuda = use_cuda
+
+        # ----------------- params for rnn cell ----------------- #
+        # TODO: input feeding
+        self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
+        for name, param in self.rnn.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_uniform_(param)
 
         # ----------------- params for directions ----------------- #
         if self.directions == 2:
