@@ -114,7 +114,7 @@ else:
     from utils.loader import Table2text_seq
 
 # config = ConfigTest()
-print("config is: \n")
+print("\n***config: ")
 pprint.pprint(vars(config), indent=2)
 
 summary_dir = os.path.join(save_file_dir, "summary")
@@ -133,7 +133,7 @@ if args.type == 1:
 else:
     filepost += "_P.txt"
 
-print("args are: \n")
+print("\n***args: ")
 pprint.pprint(vars(args), indent=2)
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------ Training Functions ------------------------------------------ #
