@@ -273,11 +273,9 @@ if __name__ == "__main__":
     # -------------------------------------------------------------------------------------------------- #
     L.info("Building Model ...")
     embedding = nn.Embedding(t_dataset.vocab.size, config.emsize, padding_idx=0)
-    nn.init.xavier_uniform_(embedding)
     if args.type == 2:
         assert hasattr(t_dataset.vocab, 'field_vocab_size')
         field_embedding = nn.Embedding(t_dataset.vocab.field_vocab_size, config.fdsize, padding_idx=0)
-        nn.init.xavier_uniform_(field_embedding)
         hidden_size = config.hdsize
         fd_size = config.fdsize
     else:
@@ -310,6 +308,12 @@ if __name__ == "__main__":
 
     L.info("Model parameters: ")
     params_dict = {name: param.size() for name, param in model.named_parameters() if param.requires_grad}
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name or 'embedding' in name:
+                nn.init.xavier_uniform_(param)
     pprint.pprint(params_dict, indent=2)
 
     # --------------------------------------- train -------------------------------------------- #

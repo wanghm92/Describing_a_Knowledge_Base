@@ -18,7 +18,6 @@ class EncoderRNN(BaseRNN):
         self.variable_lengths = variable_lengths
         self.field_concat_pos = field_concat_pos
         self.pos_embedding = nn.Embedding(pos_size, self.pemsize, padding_idx=0)
-        nn.init.xavier_uniform_(self.pos_embedding)
         self.embedding = embedding
         self.field_embedding = field_embedding
         self.rnn = self.rnn_cell(self.embed_size + self.fdsize + self.pemsize * 2, self.hidden_size,
@@ -26,11 +25,6 @@ class EncoderRNN(BaseRNN):
                                  batch_first=True,
                                  bidirectional=(directions == 2),
                                  dropout=dropout_p)
-        for name, param in self.rnn.named_parameters():
-            if 'bias' in name:
-                nn.init.constant_(param, 0.0)
-            elif 'weight' in name:
-                nn.init.xavier_uniform_(param)
 
     def forward(self, batch_s, batch_f, batch_pf, batch_pb, input_lengths=None):
 
