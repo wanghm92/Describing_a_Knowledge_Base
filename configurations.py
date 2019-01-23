@@ -1,62 +1,66 @@
 class Config(object):
-    cell = "GRU"
-    emsize = 256
-    pemsize = 5
-    nlayers = 1
-    lr = 0.001
-    epochs = 60
-    batch_size = 64
-    dropout = 0
-    directions = 2
-    max_grad_norm = 10
-    max_len = 100
-    unk_gen = False
+    def __init__(self):
+        self.cell = "GRU"
+        self.emsize = 256
+        self.pemsize = 5
+        self.nlayers = 1
+        self.lr = 0.001
+        self.epochs = 60
+        self.batch_size = 64
+        self.dropout = 0
+        self.directions = 2
+        self.max_grad_norm = 10
+        self.max_len = 100
+        self.unk_gen = False
 
 class ConfigWikibio(object):
-    cell = "LSTM"
-    emsize = 400
-    fdsize = 50
-    hdsize = 500
-    # emsize = 256
-    # fdsize = 64
-    # hdsize = 256
-    pemsize = 5
-    nlayers = 1
-    lr = 0.0005
-    epochs = 60
-    batch_size = 32
-    dropout = 0
-    directions = 1
-    # directions = 2
-    max_grad_norm = 5
-    max_len = 100
-    unk_gen = False  # allow generating UNK
+    def __init__(self):
+        self.cell = "LSTM"
+        self.emsize = 400
+        self.fdsize = 50
+        self.hdsize = 500
+        # self.emsize = 256
+        # self.fdsize = 64
+        # self.hdsize = 256
+        self.pemsize = 5
+        self.nlayers = 1
+        self.lr = 0.0005
+        self.epochs = 60
+        self.batch_size = 32
+        self.dropout = 0
+        self.directions = 1
+        # self.directions = 2
+        self.max_grad_norm = 5
+        self.max_len = 100
+        self.unk_gen = True  # allow generating UNK
 
 class ConfigSmall(object):
-    cell = "GRU"
-    emsize = 256
-    pemsize = 5
-    nlayers = 1
-    lr = 0.001
-    epochs = 60
-    batch_size = 32
-    dropout = 0
-    directions = 2
-    max_grad_norm = 10
-    max_len = 100
-    unk_gen = False
+    def __init__(self):
+        self.cell = "GRU"
+        self.emsize = 256
+        self.pemsize = 5
+        self.nlayers = 1
+        self.lr = 0.001
+        self.epochs = 60
+        self.batch_size = 32
+        self.dropout = 0
+        self.directions = 2
+        self.max_grad_norm = 10
+        self.max_len = 100
+        self.unk_gen = False
 
 class ConfigTest(object):
-    cell = "LSTM"
-    emsize = 30
-    pemsize = 5
-    nlayers = 1
-    lr = 0.001
-    epochs = 2
-    batch_size = 3
-    dropout = 0
-    directions = 2
-    max_grad_norm = 1
-    testmode = True
-    max_len = 50
-    unk_gen = False
+    def __init__(self):
+        self.cell = "LSTM"
+        self.emsize = 30
+        self.pemsize = 5
+        self.nlayers = 1
+        self.lr = 0.001
+        self.epochs = 2
+        self.batch_size = 3
+        self.dropout = 0
+        self.directions = 2
+        self.max_grad_norm = 1
+        self.testmode = True
+        self.max_len = 50
+        self.unk_gen = False

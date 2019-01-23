@@ -18,7 +18,7 @@ class Vocabulary:
             self.start_end_tokens = False
             self.size = len(word2idx)
             self.field_vocab_size = len(field2idx)
-            self.field_vocab_size += 2  # TODO: remove this legacy
+            # self.field_vocab_size += 2  # TODO: remove this legacy
         else:
             self.word2idx = dict()
             self.idx2word = dict()

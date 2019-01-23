@@ -12,6 +12,7 @@ from eval import Evaluate
 import random, os, pprint, logging, time
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
+import numpy as np
 
 program = os.path.basename(sys.argv[0])
 L = logging.getLogger(program)
@@ -171,9 +172,9 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         torch.set_grad_enabled(True)
         epoch_loss = 0
 
-        batch_indices = list(range(len_batch))  # start from the short ones
+        batch_indices = np.arange(len_batch)  # start from the short ones
         if args.shuffle:
-            random.shuffle(batch_indices)
+            batch_indices = np.random.permutation(batch_indices)
 
         start_time = time.time()
         for idx, batch_idx in enumerate(batch_indices):
@@ -377,7 +378,7 @@ if __name__ == "__main__":
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
-        cand, ref, eval_loss, others = predictor.preeval_batch(dataset, fig=False, save_dir=save_file_dir)
+        cand, ref, eval_loss, others = predictor.preeval_batch(dataset, fig=True, save_dir=save_file_dir)
         cands_with_unks, cands_with_pgens, srcs, fds = others
         L.info('Result:')
         L.info('eval_loss: {}'.format(eval_loss))
