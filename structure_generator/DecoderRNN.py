@@ -68,7 +68,7 @@ class DecoderRNN(BaseRNN):
         # print('field_input_size: {}'.format(field_input_size))
 
         if self.attn_fuse == 'concat':
-            self.v = nn.Linear(hidden_size, 1)
+            self.v = nn.Linear(hidden_size, 1, bias=False)
             self.Wd = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
         else:
             self.v_hidden = None
@@ -77,31 +77,31 @@ class DecoderRNN(BaseRNN):
 
             if self.attn_level == 3:
                 if self.attn_type != 'dot':
-                    self.v_hidden = nn.Linear(hidden_size, 1)
-                    self.v_input = nn.Linear(hidden_size, 1)
-                    self.v_field = nn.Linear(hidden_size, 1)
+                    self.v_hidden = nn.Linear(hidden_size, 1, bias=False)
+                    self.v_input = nn.Linear(hidden_size, 1, bias=False)
+                    self.v_field = nn.Linear(hidden_size, 1, bias=False)
                 self.Wd_hidden = nn.Linear(hidden_size, hidden_size)
                 self.Wd_input = nn.Linear(hidden_size, hidden_size)
                 self.Wd_field = nn.Linear(hidden_size, hidden_size)
 
             elif self.attn_level == 2:
                 if self.attn_type != 'dot':
-                    self.v_field = nn.Linear(hidden_size, 1)
+                    self.v_field = nn.Linear(hidden_size, 1, bias=False)
                 self.Wd_field = nn.Linear(hidden_size, hidden_size)
 
                 if self.attn_src == 'emb':
                     if self.attn_type != 'dot':
-                        self.v_input = nn.Linear(hidden_size, 1)
+                        self.v_input = nn.Linear(hidden_size, 1, bias=False)
                     self.Wd_input = nn.Linear(hidden_size, hidden_size)
 
                 elif self.attn_src == 'rnn':
                     if self.attn_type != 'dot':
-                        self.v_hidden = nn.Linear(hidden_size, 1)
+                        self.v_hidden = nn.Linear(hidden_size, 1, bias=False)
                     self.Wd_hidden = nn.Linear(hidden_size, hidden_size)
 
             else:
                 if self.attn_type != 'dot':
-                    self.v_hidden = nn.Linear(hidden_size, 1)
+                    self.v_hidden = nn.Linear(hidden_size, 1, bias=False)
                 self.Wd_hidden = nn.Linear(hidden_size, hidden_size)
 
         # ----------------- params for encoder memory keys ----------------- #
