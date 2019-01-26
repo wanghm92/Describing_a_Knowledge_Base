@@ -414,7 +414,7 @@ class DecoderRNN(BaseRNN):
                      enc_hidden_vals, enc_input_vals, enc_field_vals
                      ):
         # print('input_ids: {}'.format(input_ids.size()))
-
+        # coverage, weighted_coverage = coverage
         attn_scores = self._get_attn_scores(batch_size, max_enc_len, coverage, enc_mask, dec_hidden,
                                             enc_hidden_keys, enc_input_keys, enc_field_keys, self.attn_type)
 
@@ -450,7 +450,7 @@ class DecoderRNN(BaseRNN):
 
             # print('attn_weights: {}'.format(attn_weights.size()))
 
-            weighted_attn = (1-p_gen) * attn_weights
+            weighted_attn = (1-p_gen) * attn_weights  # * (1-weighted_coverage.clamp(0, 1))
             # print('weighted_attn: {}'.format(weighted_attn.size()))
 
             # print('max_source_oov: {}'.format(max_source_oov))
@@ -585,9 +585,11 @@ class DecoderRNN(BaseRNN):
         if fig:
             attn = []
         decoder_input = self.embedding(targets)
+        # weighted_coverage = coverage.clone()
         # step through decoder hidden states
         for step in range(max_length):
             dec_hidden, _c = self.rnn(decoder_input, decoder_hidden_init)
+            # TODO combined_vocab to be changed to logits_or_prob
             combined_vocab, attn_weights, (p_gen, src_prob) = self._decode_step(batch_size, input_ids, coverage,
                                                                                 max_source_oov,
                                                                                 dec_hidden.squeeze(1),
@@ -627,6 +629,7 @@ class DecoderRNN(BaseRNN):
             decoder_input = self.embedding(symbols)
             decoder_hidden_init = _c
             if self.use_cov_loss:
+                # weighted_coverage = weighted_coverage + attn_weights * p_gen
                 coverage = coverage + attn_weights
 
             # record eval loss
