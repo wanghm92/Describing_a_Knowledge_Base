@@ -86,6 +86,10 @@ class Vocabulary:
         vector.append(self.word2idx['<EOS>'])
         return [self.word2idx['<SOS>']] + vector
 
+    def add_end(self, vector):
+        vector.append(self.word2idx['<EOS>'])
+        return vector
+
     def vectorize_field(self, vector):
         _o_field = []
         for fd in vector:
@@ -115,6 +119,9 @@ class Vocabulary:
                 _source.append(self.word2idx['<UNK>'])
                 # use field type embedding for OOV field values
                 # _source.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
+        if self.dec_type == 'pg':
+            _o_source = self.add_end(_o_source)
+            _source = self.add_end(_source)
         return _o_source, source_oov, _source, oov_freq
 
     def vectorize_target(self, vector, source_oov, table):
