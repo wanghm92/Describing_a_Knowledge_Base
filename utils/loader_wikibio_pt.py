@@ -1,6 +1,6 @@
 import torch
 from collections import Counter
-import pickle, sys, json, io
+import pickle, sys, json, io, copy
 from os.path import expanduser
 HOME = expanduser("~")
 from tqdm import tqdm
@@ -76,6 +76,9 @@ class Vocabulary:
 
         self.field2idx['<PAD>'] = 0
         self.field2idx['<UNK>'] = 1
+        if self.dec_type == 'pt':
+            self.field2idx['<EOS>'] = 2
+            self.field2idx['<SOS>'] = 3
 
         offset = len(self.field2idx)
         for idx, fd in enumerate(self.field_vocab):
@@ -86,14 +89,15 @@ class Vocabulary:
         vector.append(self.word2idx['<EOS>'])
         return [self.word2idx['<SOS>']] + vector
 
-    def add_end(self, vector):
-        vector.append(self.word2idx['<EOS>'])
-        return vector
-
-    def vectorize_field(self, vector):
+    def vectorize_field(self, vector, is_target=False):
         _o_field = []
         for fd in vector:
             _o_field.append(self.field2idx.get(fd, self.field2idx['<UNK>']))
+
+        if self.dec_type == 'pt':
+            _o_field.append(self.field2idx['<EOS>'])
+            if is_target:
+                _o_field = [self.field2idx['<SOS>']] + _o_field
         return _o_field
 
     def vectorize_source(self, vector, table):
@@ -119,9 +123,9 @@ class Vocabulary:
                 _source.append(self.word2idx['<UNK>'])
                 # use field type embedding for OOV field values
                 # _source.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
-        if self.dec_type == 'pg':
-            _o_source = self.add_end(_o_source)
-            _source = self.add_end(_source)
+        if self.dec_type == 'pt':
+            _o_source.append(self.word2idx['<EOS>'])
+            _source.append(self.word2idx['<EOS>'])
         return _o_source, source_oov, _source, oov_freq
 
     def vectorize_target(self, vector, source_oov, table):
@@ -133,22 +137,25 @@ class Vocabulary:
                 _target.append(self.word2idx[word])
             except KeyError:
                 oov_freq += 1
-                # NOTE: use UNK for text words not in source OOVs
-                if word not in source_oov:
-                    _o_target.append(self.word2idx['<UNK>'])
-                    _target.append(self.word2idx['<UNK>'])
-                else:
-                    # NOTE: use source_oov idx for OOV text words but appear in source OOVs
-                    _o_target.append(source_oov[word] + self.size)
-                    _target.append(self.word2idx['<UNK>'])
-                    # _target.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
+                _o_target.append(self.word2idx['<UNK>'])
+                _target.append(self.word2idx['<UNK>'])
+                # # NOTE: use UNK for text words not in source OOVs
+                # if word not in source_oov:
+                #     _o_target.append(self.word2idx['<UNK>'])
+                #     _target.append(self.word2idx['<UNK>'])
+                # else:
+                #     # NOTE: use source_oov idx for OOV text words but appear in source OOVs
+                #     _o_target.append(source_oov[word] + self.size)
+                #     _target.append(self.word2idx['<UNK>'])
+                #     # _target.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
         return self.add_start_end(_o_target), self.add_start_end(_target), oov_freq
 
 
 class Table2text_seq:
     def __init__(self, data_src, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available(),
                  train_mode=0, dec_type='pg'):
-        prefix = "{}/table2text_nlg/data/dkb/wikibio_dataset/".format(HOME)
+        # TODO: change the path
+        prefix = "{}/table2text_nlg/data/dkb/wikibio_pt_data/".format(HOME)
         assert type == 2
         self.vocab = None
         self.dec_type = dec_type
@@ -188,7 +195,7 @@ class Table2text_seq:
     def load_data_light(self, path):
         print("Loading data $LIGHT$ from {}".format(path))
         prefix = "{}/table2text_nlg/describe_kb/outputs".format(HOME)
-        vocab_path_pkl = "{}/wikibio_vocab.pkl".format(prefix)
+        vocab_path_pkl = "{}/wikibio_vocab_pt.pkl".format(prefix)
         print("loading vocab ... from {}".format(vocab_path_pkl))
         with open(vocab_path_pkl, 'rb') as fin:
             data = pickle.load(fin)
@@ -225,35 +232,63 @@ class Table2text_seq:
 
         print("{} samples to be processed".format(len(old_sources)))
         for idx, old_source in enumerate(tqdm(old_sources)):
-            # print("old_source: {}".format(old_source))
-            source = []
-            field = []
             table = {}
-            p_for = []
-            p_bck = []
-            target = old_targets[idx]
-            target = [x.lower() for x in target]  # NOTE: changed to lowercase strings
-            if len(target) > self.text_len:
-                self.text_len = len(target) + 2
+
+            value_s = []
+            field_s = []
+            p_for_s = []
+            p_bck_s = []
             for key, value, pos, rpos in old_source:
                 value = value.lower()  # NOTE: changed to lowercase strings
                 tag = '<'+key+'>'  # NOTE: change key into special tokens
-                source.append(value)
-                field.append(tag)
-                p_for.append(pos)
-                p_bck.append(rpos)
+                value_s.append(value)
+                field_s.append(tag)
+                p_for_s.append(pos)
+                p_bck_s.append(rpos)
 
                 if value not in table:
                     table[value] = tag
-            curr_p_max = max(p_for) + 1
+
+            old_target = old_targets[idx]
+            temp = copy.deepcopy(old_target)
+            if len(list(temp)) > self.text_len:
+                self.text_len = len(list(temp)) + 2
+
+            value_t = []
+            field_t = []
+            p_for_t = []
+            p_bck_t = []
+            lab_t = []
+            for key, value, pos, rpos, lab in old_target:
+                value = value.lower()  # NOTE: changed to lowercase strings
+                tag = '<'+key+'>'  # NOTE: change key into special tokens
+                value_t.append(value)
+                field_t.append(tag)
+                p_for_t.append(pos)
+                p_bck_t.append(rpos)
+                lab_t.append(lab)
+
+            # print("value_s: {}".format(value_s))
+            # print("field_s: {}".format(field_s))
+            # print("p_for_s: {}".format(p_for_s))
+            # print("p_for_s: {}".format(p_bck_s))
+            # print("value_t: {}".format(value_t))
+            # print("field_t: {}".format(field_t))
+            # print("p_for_t: {}".format(p_for_t))
+            # print("p_for_t: {}".format(p_bck_t))
+            # print("lab_t: {}".format(lab_t))
+
+            # TODO: this is not correct
+            curr_p_max = max(p_for_s) + 1
 
             if self.max_p < curr_p_max:
                 self.max_p = curr_p_max
             # print("source: {}".format(source))
             # print("field: {}".format(field))
-            total.append(source + target)
-            total_field.append(field)
-            samples.append([source, target, field, p_for, p_bck, table])
+            target = (value_t, field_t, p_for_t, p_bck_t, lab_t)
+            total.append(value_s + value_t)
+            total_field.append(field_s + field_t)
+            samples.append([value_s, target, field_s, p_for_s, p_bck_s, table])
 
         '''
             torch.nn.utils.rnn.pack_padded_sequence requires the sequence lengths sorted in decreasing order
@@ -261,8 +296,8 @@ class Table2text_seq:
         print("sorting samples ...")
         samples.sort(key=lambda x: len(x[0]), reverse=True)
 
-        vocab_path_pkl = "{}/wikibio_vocab.pkl".format(prefix)
-        vocab_path_js = "{}/wikibio_vocab.json".format(prefix)
+        vocab_path_pkl = "{}/wikibio_vocab_pt.pkl".format(prefix)
+        vocab_path_js = "{}/wikibio_vocab_pt.json".format(prefix)
         if self.data_src == 'train':
             print("saving vocab ...")
             self.vocab = Vocabulary(corpus=total, field=total_field, dec_type=self.dec_type)
@@ -317,6 +352,8 @@ class Table2text_seq:
 
         # print(len(sample))
         batch_o_s, batch_o_t, batch_f, batch_t, batch_s, batch_pf, batch_pb = [], [], [], [], [], [], []
+        if self.dec_type == 'pt':
+            batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t = [], [], [], []
         source_len, target_len, w2fs = [], [], []
         list_oovs = []
         targets = []
@@ -326,18 +363,38 @@ class Table2text_seq:
         for data in sample:
             # print("data: {}".format(data))
             source = data[0]
-            target = data[1]
+            target = data[1]  # (value_t, field_t, p_for_t, p_bck_t, lab_t)
             field = data[2]
             p_for = data[3]
             p_bck = data[4]
             table = data[5]
-            source_len.append(len(source))
-            target_len.append(len(target) + 2)
+            src_len = len(source)
+            if self.dec_type == 'pt':
+                value_t, field_t, p_for_t, p_bck_t, lab_t = target
+                p_for.append(1)
+                p_bck.append(1)
+                p_for_t = [1] + p_for_t + [1]
+                p_bck_t = [1] + p_bck_t + [1]
+                lab_t.append(src_len)
+                src_len += 1  # <EOS>
+                tgt_len = len(value_t) + 2
+            else:
+                tgt_len = len(target) + 2
+
+            # print("src_len: {}".format(src_len))
+            # print("tgt_len: {}".format(tgt_len))
+
+            source_len.append(src_len)
+            target_len.append(tgt_len)
 
             # ----------------------- word to ids ------------------------- #
-            _o_fields = self.vocab.vectorize_field(field)
+            _fields = self.vocab.vectorize_field(field)
             _o_source, source_oov, _source, oov_freq_src = self.vocab.vectorize_source(source, table)
-            _o_target, _target, oov_freq_tgt = self.vocab.vectorize_target(target, source_oov, table)
+            if self.dec_type == 'pt':
+                _o_target, _target, oov_freq_tgt = self.vocab.vectorize_target(value_t, source_oov, table)
+                _fields_t = self.vocab.vectorize_field(field_t, is_target=True)
+            else:
+                _o_target, _target, oov_freq_tgt = self.vocab.vectorize_target(target, source_oov, table)
 
             self.oov_cnt_src += oov_freq_src
             self.oov_cnt_tgt += oov_freq_tgt
@@ -354,32 +411,70 @@ class Table2text_seq:
                        for word, idx in source_oov}
                 w2fs.append(w2f)
                 list_oovs.append(idx2word_oov)
-                targets.append(target)  # tokens
+                if self.dec_type == 'pt':
+                    targets.append(value_t)  # tokens
+                else:
+                    targets.append(target)  # tokens
                 sources.append(source)  # tokens
                 fields.append(field)    # tokens
-            batch_o_s.append(_o_source)
+
+            # print("_o_source ({}): {}".format(len(_o_source), _o_source))
+            # print("_fields ({}): {}".format(len(_fields), _fields))
+            # print("p_for ({}): {}".format(len(p_for), p_for))
+            # print("p_bck ({}): {}".format(len(p_bck), p_bck))
+            # print("_source ({}): {}".format(len(_source), _source))
+            #
+            # print("_o_target ({}): {}".format(len(_o_target), _o_target))
+            # print("_fields_t ({}): {}".format(len(_fields_t), _fields_t))
+            # print("p_for_t ({}): {}".format(len(p_for_t), p_for_t))
+            # print("p_bck_t ({}): {}".format(len(p_bck_t), p_bck_t))
+            # print("_target ({}): {}".format(len(_target), _target))
+            # print("lab_t ({}): {}".format(len(lab_t), lab_t))
+            # sys.exit(0)
+
+            batch_s.append(_source)
+            batch_f.append(_fields)
             batch_pf.append(p_for)
             batch_pb.append(p_bck)
-            batch_o_t.append(_o_target)
+            batch_o_s.append(_o_source)
+
             batch_t.append(_target)
-            batch_s.append(_source)
-            batch_f.append(_o_fields)
+            batch_o_t.append(_o_target)
+            if self.dec_type == 'pt':
+                batch_f_t.append(_fields_t)
+                batch_pf_t.append(p_for_t)
+                batch_pb_t.append(p_bck_t)
+                batch_lab_t.append(lab_t)
 
         batch_s = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_s]
-        batch_o_s = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_o_s]
         batch_f = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_f]
         batch_pf = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_pf]
         batch_pb = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_pb]
+        batch_o_s = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_o_s]
+
         batch_t = [torch.LongTensor(self.pad_vector(i, max(target_len))) for i in batch_t]
         batch_o_t = [torch.LongTensor(self.pad_vector(i, max(target_len))) for i in batch_o_t]
+        if self.dec_type == 'pt':
+            batch_f_t = [torch.LongTensor(self.pad_vector(i, max(target_len))) for i in batch_f_t]
+            batch_pf_t = [torch.LongTensor(self.pad_vector(i, max(target_len))) for i in batch_pf_t]
+            batch_pb_t = [torch.LongTensor(self.pad_vector(i, max(target_len))) for i in batch_pb_t]
+            batch_lab_t = [torch.LongTensor(self.pad_vector(i, max(target_len))) for i in batch_lab_t]
 
-        batch_o_s = torch.stack(batch_o_s, dim=0)
+        batch_s = torch.stack(batch_s, dim=0)
         batch_f = torch.stack(batch_f, dim=0)
         batch_pf = torch.stack(batch_pf, dim=0)
         batch_pb = torch.stack(batch_pb, dim=0)
-        batch_t = torch.stack(batch_t, dim=0)
-        batch_s = torch.stack(batch_s, dim=0)
+        batch_o_s = torch.stack(batch_o_s, dim=0)
+
         batch_o_t = torch.stack(batch_o_t, dim=0)
+        batch_t = torch.stack(batch_t, dim=0)
+        if self.dec_type == 'pt':
+            batch_f_t = torch.stack(batch_f_t, dim=0)
+            batch_pf_t = torch.stack(batch_pf_t, dim=0)
+            batch_pb_t = torch.stack(batch_pb_t, dim=0)
+            batch_lab_t = torch.stack(batch_lab_t, dim=0)
+            batch_t = (batch_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t)  # NOTE: batch_t is now a tuple
+
         if self.data_src != 'train':
             targets= [i[:max(target_len)-2] for i in targets]
             sources= [i[:max(source_len)] for i in sources]
@@ -395,7 +490,18 @@ class Table2text_seq:
                 = self.corpus[index]
             batch_s = batch_s.to(self.device)
             batch_o_s = batch_o_s.to(self.device)
-            batch_t = batch_t.to(self.device)
+            if self.dec_type == 'pt':
+                batch_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t = batch_t
+                batch_t = batch_t.to(self.device)
+                batch_f_t = batch_f_t.to(self.device)
+                batch_pf_t = batch_pf_t.to(self.device)
+                batch_pb_t = batch_pb_t.to(self.device)
+                batch_lab_t = batch_lab_t.to(self.device)
+                # batch_t = (batch_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t)  # NOTE: batch_t is now a tuple
+                batch_t = (batch_t, batch_f_t, batch_lab_t)  # NOTE: batch_t is now a tuple
+            else:
+                batch_t = batch_t.to(self.device)
+
             batch_o_t = batch_o_t.to(self.device)
             batch_f = batch_f.to(self.device)
             batch_pf = batch_pf.to(self.device)
