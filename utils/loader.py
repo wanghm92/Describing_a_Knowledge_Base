@@ -302,7 +302,7 @@ class Table2text_seq:
             target_len.append(len(target) + 2)
 
             # ----------------------- word to ids ------------------------- #
-            _o_fields = self.vocab.vectorize_field(field)
+            _fields = self.vocab.vectorize_field(field)
             _o_source, source_oov, _source, oov_freq_src = self.vocab.vectorize_source(source, table)
             _o_target, _target, oov_freq_tgt = self.vocab.vectorize_target(target, source_oov, table)
 
@@ -322,29 +322,34 @@ class Table2text_seq:
                 targets.append(target)  # tokens
                 sources.append(source)  # tokens
                 fields.append(field)    # tokens
+
+            batch_s.append(_source)
             batch_o_s.append(_o_source)
+            batch_f.append(_fields)
             batch_pf.append(p_for)
             batch_pb.append(p_bck)
-            batch_o_t.append(_o_target)
+
             batch_t.append(_target)
-            batch_s.append(_source)
-            batch_f.append(_o_fields)
+            batch_o_t.append(_o_target)
 
         batch_s = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_s]
-        batch_o_s = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_o_s]
         batch_f = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_f]
         batch_pf = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_pf]
         batch_pb = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_pb]
+        batch_o_s = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_o_s]
+
         batch_t = [torch.LongTensor(self.pad_vector(i, max(target_len))) for i in batch_t]
         batch_o_t = [torch.LongTensor(self.pad_vector(i, max(target_len))) for i in batch_o_t]
 
-        batch_o_s = torch.stack(batch_o_s, dim=0)
+        batch_s = torch.stack(batch_s, dim=0)
         batch_f = torch.stack(batch_f, dim=0)
         batch_pf = torch.stack(batch_pf, dim=0)
         batch_pb = torch.stack(batch_pb, dim=0)
+        batch_o_s = torch.stack(batch_o_s, dim=0)
+
         batch_t = torch.stack(batch_t, dim=0)
-        batch_s = torch.stack(batch_s, dim=0)
         batch_o_t = torch.stack(batch_o_t, dim=0)
+
         if self.data_src != 'train':
             targets= [i[:max(target_len)-2] for i in targets]
             sources= [i[:max(source_len)] for i in sources]
