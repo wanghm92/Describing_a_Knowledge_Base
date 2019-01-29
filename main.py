@@ -108,7 +108,8 @@ if not os.path.exists(save_file_dir):
 # -------------------------------- Hyperparams and Tensorboard ------------------------------------ #
 if args.type == 2:
     config = ConfigWikibio()
-    from utils.loader_wikibio import Table2text_seq
+    # from utils.loader_wikibio import Table2text_seq
+    from utils.loader_wikibio_pt import Table2text_seq
 else:
     config = Config()
     from utils.loader import Table2text_seq
@@ -273,6 +274,9 @@ if __name__ == "__main__":
     # -------------------------------------------------------------------------------------------------- #
     L.info("Building Model ...")
     embedding = nn.Embedding(t_dataset.vocab.size, config.emsize, padding_idx=0)
+    pos_size = t_dataset.max_p
+    pemsize = config.pemsize
+    pos_embedding = nn.Embedding(pos_size, pemsize, padding_idx=0)
     if args.type == 2:
         assert hasattr(t_dataset.vocab, 'field_vocab_size')
         field_embedding = nn.Embedding(t_dataset.vocab.field_vocab_size, config.fdsize, padding_idx=0)
@@ -285,12 +289,12 @@ if __name__ == "__main__":
 
     encoder = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding,
                          embed_size=config.emsize, fdsize=fd_size,
-                         hidden_size=hidden_size, pos_size=t_dataset.max_p, pemsize=config.pemsize,
+                         hidden_size=hidden_size, pos_size=pos_size, pemsize=pemsize,
                          attn_src=args.attn_src,
                          input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers,
                          rnn_cell=config.cell, directions=config.directions,
                          variable_lengths=True, field_concat_pos=args.field_concat_pos,
-                         field_embedding=field_embedding)
+                         field_embedding=field_embedding, pos_embedding=pos_embedding)
     decoder = DecoderRNN(dec_type=args.dec_type, vocab_size=t_dataset.vocab.size, embedding=embedding,
                          embed_size=config.emsize, hidden_size=hidden_size, fdsize=fd_size, pemsize=config.pemsize,
                          sos_id=3, eos_id=2, unk_id=1,
@@ -301,7 +305,8 @@ if __name__ == "__main__":
                          field_self_att=args.field_self_att, field_concat_pos=args.field_concat_pos,
                          field_context=args.field_context, context_mlp=args.context_mlp,
                          mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen,
-                         input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers)
+                         input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers,
+                         field_embedding=field_embedding, pos_embedding=pos_embedding)
 
     model = Seq2seq(encoder, decoder).to(device)
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
@@ -313,21 +318,21 @@ if __name__ == "__main__":
             if 'rnn' in name or 'V' in name or 'embedding' in name:
                 if 'bias' in name:
                     nn.init.constant_(param, 0.0)
-                    params_dict["[Constant-0] {}".format(name)] = param.size()
+                    params_dict["[Constant-0][{}] {}".format(param.dtype, name)] = param.size()
                     # print("Constant(0): {}".format(name))
                 else:
                     nn.init.xavier_uniform_(param)
-                    params_dict["[Xavier] {}".format(name)] = param.size()
+                    params_dict["[Xavier][{}] {}".format(param.dtype, name)] = param.size()
             else:
                 try:
                     nn.init.xavier_uniform_(param)
-                    params_dict["[Xavier] {}".format(name)] = param.size()
+                    params_dict["[Xavier][{}] {}".format(param.dtype, name)] = param.size()
                 except:
                     if param.size()[0] == 1:
                         nn.init.constant_(param, 0.0)
-                        params_dict["[Constant-0] {}".format(name)] = param.size()
+                        params_dict["[Constant-0][{}] {}".format(param.dtype, name)] = param.size()
                     else:
-                        params_dict["[Uniform: 1/dim*0.5] {}".format(name)] = param.size()
+                        params_dict["[Uniform: 1/dim*0.5][{}] {}".format(param.dtype, name)] = param.size()
 
     pprint.pprint(params_dict, indent=2)
     # --------------------------------------- train -------------------------------------------- #

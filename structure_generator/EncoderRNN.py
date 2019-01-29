@@ -8,7 +8,7 @@ class EncoderRNN(BaseRNN):
     def __init__(self, vocab_size=0, embedding=None, hidden_size=0, pos_size=0, pemsize=0, embed_size=0, fdsize=0,
                  attn_src='emb', input_dropout_p=0, dropout_p=0, n_layers=1, rnn_cell='gru', directions=2, 
                  variable_lengths=True, field_concat_pos=False,
-                 field_embedding=None):
+                 field_embedding=None, pos_embedding=None):
         super(EncoderRNN, self).__init__(vocab_size, hidden_size, input_dropout_p, dropout_p, n_layers, rnn_cell)
 
         self.attn_src = attn_src
@@ -17,7 +17,7 @@ class EncoderRNN(BaseRNN):
         self.pemsize = pemsize
         self.variable_lengths = variable_lengths
         self.field_concat_pos = field_concat_pos
-        self.pos_embedding = nn.Embedding(pos_size, self.pemsize, padding_idx=0)
+        self.pos_embedding = pos_embedding
         self.embedding = embedding
         self.field_embedding = field_embedding
         self.rnn = self.rnn_cell(self.embed_size + self.fdsize + self.pemsize * 2, self.hidden_size,
