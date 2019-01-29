@@ -24,7 +24,7 @@ class ConfigWikibio(object):
         # self.hdsize = 256
         self.pemsize = 5
         self.nlayers = 1
-        self.lr = 0.0005
+        self.lr = 0.0003
         self.epochs = 60
         self.batch_size = 32
         self.dropout = 0

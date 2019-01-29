@@ -135,7 +135,7 @@ class DecoderRNN(BaseRNN):
                 if self.field_context:
                     output_layer_input_size += field_input_size
                 if self.attn_src == 'emb':
-                    output_layer_input_size += hidden_size
+                    output_layer_input_size += embed_size
                 elif self.attn_src == 'rnn':
                     output_layer_input_size += enc_hidden_size
             else:
