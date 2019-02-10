@@ -43,6 +43,8 @@ parser.add_argument('--mask', action='store_true',
                     help='false(0)/true(1)')
 parser.add_argument('--batch', type=int, default='64',
                     help='batch size')
+parser.add_argument('--max_len', type=int, default='100',
+                    help='max_len')
 
 parser.add_argument('--attn_type', type=str, default='concat', choices=['concat', 'dot'],
                     help='type of attention score calculation: concat, dot')
@@ -304,7 +306,7 @@ if __name__ == "__main__":
                          use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
                          field_self_att=args.field_self_att, field_concat_pos=args.field_concat_pos,
                          field_context=args.field_context, context_mlp=args.context_mlp,
-                         mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen,
+                         mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen, max_len=args.max_len,
                          input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers,
                          field_embedding=field_embedding, pos_embedding=pos_embedding)
 
