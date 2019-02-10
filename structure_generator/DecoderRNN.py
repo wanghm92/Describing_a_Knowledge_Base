@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 from .baseRNN import BaseRNN
 # self.word2idx['<UNK>'] = 1
-
+# np.set_printoptions(threshold=np.nan)
 
 class DecoderRNN(BaseRNN):
 
@@ -158,7 +158,6 @@ class DecoderRNN(BaseRNN):
 
         # ----------------- params for rnn cell ----------------- #
         if self.decoder_type == 'pt':
-            # self.rnn = self.rnn_cell(embed_size + field_input_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
             self.rnn = self.rnn_cell(embed_size + fdsize, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
         else:
             self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
@@ -196,6 +195,13 @@ class DecoderRNN(BaseRNN):
         return f_matrix, enc_hidden_selfatt, enc_input_selfatt, enc_field_selfatt
 
     def _get_enc_keys(self, enc_hidden, enc_input, enc_field, batch_size, max_enc_len):
+        """
+        project encoder memories to attention keys
+        :param enc_hidden: hidden states
+        :param enc_input:  embeddings
+        :param enc_field:  field embeddings
+        :return: FC layer outputs, self.Wr for hidden, self.We for input, self.Wf for field
+        """
 
         if self.attn_level == 3:
             enc_hidden_flat = enc_hidden.view(batch_size * max_enc_len, -1)
@@ -229,6 +235,12 @@ class DecoderRNN(BaseRNN):
 
 
     def _attn_score_concat(self, batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask):
+        """
+        attention score in the form e = v` tanh(Wx+b)
+        :param dec_query:  attention query vectors
+        :param enc_keys:   output from self._get_enc_keys
+        :param cov_vector: coverage vector
+        """
 
         attn_src = dec_query.unsqueeze(1).expand_as(enc_keys) + enc_keys
         # print('attn_src: {}'.format(attn_src.size()))
@@ -247,17 +259,25 @@ class DecoderRNN(BaseRNN):
             return et
 
     def _attn_score_dot(self, dec_query, enc_keys, enc_mask):
+        """
+        attention score in the form e = x*y
+        :param dec_query:  attention query vectors
+        :param enc_keys:   output from self._get_enc_keys
+        :param cov_vector: coverage vector
+        """
 
         et = dec_query.unsqueeze(1).bmm(enc_keys.transpose(1, 2)).squeeze(1)
-        et.masked_fill_(enc_mask.data.byte(), -1e10)  # mask to -1e10 before applying softmax
+        et.masked_fill_(enc_mask.data.byte(), -1e10)
 
         if not self.decoder_type == 'pt':
             score = F.softmax(et, dim=1)  # along direction of sequence length
             return score
         else:
+            # NOTE: here et is masked to -1e10 at paddings
             return et
 
     def _attn_score(self, batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask, attn_type='concat'):
+        """ Wrapper for two types of attention scores: concat and dot"""
 
         if attn_type == 'concat':
             return self._attn_score_concat(batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask)
@@ -266,6 +286,7 @@ class DecoderRNN(BaseRNN):
 
     def _get_attn_score_fuse_concat(self, batch_size, max_enc_len, cov_vector, enc_mask,
                                     dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys):
+        """ normal multi-source attention score using concat"""
 
         dec_query = self.Wd(dec_hidden)
 
@@ -290,6 +311,7 @@ class DecoderRNN(BaseRNN):
 
     def _get_attn_score_fuse_hierarchical(self, batch_size, max_enc_len, cov_vector, enc_mask, dec_hidden,
                                           enc_hidden_keys, enc_input_keys, enc_field_keys, attn_type='concat'):
+        """ aggregated attention score with normalization from lower layers"""
 
         attn_score_top = None
         attn_score_mid = None
@@ -353,6 +375,7 @@ class DecoderRNN(BaseRNN):
 
     def _get_attn_scores(self, batch_size, max_enc_len, coverage, enc_mask, dec_hidden, 
                          enc_hidden_keys, enc_input_keys, enc_field_keys, attn_type):
+        """ Meta wrapper for attention scores with and without coverage"""
 
         if self.use_cov_attn:
             cov_vector = self.Wc(coverage.view(-1, 1)).view(batch_size, max_enc_len, -1)
@@ -367,6 +390,8 @@ class DecoderRNN(BaseRNN):
                                                           enc_hidden_keys, enc_input_keys, enc_field_keys, attn_type)
 
     def _get_contexts(self, attn_scores, enc_hidden_vals, enc_input_vals, enc_field_vals):
+        """ project encoder memory bank to compute the source context vectors, later weighted by attention scores"""
+
         enc_context_proj = None
         if self.attn_level == 3:
             enc_hidden_context = attn_scores[0].unsqueeze(1).bmm(enc_hidden_vals).squeeze(1)
@@ -612,6 +637,7 @@ class DecoderRNN(BaseRNN):
 
         lengths = np.array([max_length] * batch_size)
         finished = np.array([False] * batch_size)
+        no_dup_mask = np.ones((batch_size, max_enc_len), dtype=np.float32)
         losses = []
         decoded_outputs = []
         src_probs = [] if self.decoder_type == 'pg' else None
@@ -659,9 +685,16 @@ class DecoderRNN(BaseRNN):
             if not self.unk_gen:
                 vocab_probs[:, self.unk_id] = 0  # NOTE: not allow decoder to output UNK
 
+            no_dup_mask_tensor = torch.from_numpy(no_dup_mask).cuda()
+            vocab_probs = torch.mul(vocab_probs, no_dup_mask_tensor)
+
             probs, symbols_or_positions = vocab_probs.topk(1)  # greedy decoding: get word indices and probs
+
+            # accumulate used positions
+            for x, y in zip(range(batch_size), symbols_or_positions.squeeze(-1).tolist()):
+                no_dup_mask[x][y] = 0
+
             if self.decoder_type == 'pt':
-                # print('symbols_or_positions: {}'.format(symbols_or_positions.size()))
                 # print('input_ids: {}'.format(input_ids.size()))
                 symbols = input_ids.gather(1, symbols_or_positions)
             else:
