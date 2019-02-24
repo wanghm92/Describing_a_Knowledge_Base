@@ -7,7 +7,7 @@ from predictor import Predictor
 from structure_generator.EncoderRNN import EncoderRNN
 from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq
-from configurations import Config, ConfigSmall, ConfigTest, ConfigWikibio
+from configurations import Config, ConfigSmall, ConfigTest, ConfigWikibio, ConfigRotowire
 from eval import Evaluate
 import random, os, pprint, logging, time
 from tensorboardX import SummaryWriter
@@ -31,14 +31,16 @@ parser.add_argument('--cuda', action='store_false',
                     help='use CUDA')
 parser.add_argument('--dec_type', type=str, default='pg', choices=['pg', 'pt', 'seq'],
                     help='decoder model type pg(pointer-generator)/pt(pointer-net)(WIP)/seq(seq2seq)')
+parser.add_argument('--enc_type', type=str, default='rnn', choices=['rnn', 'fc', 'trans'],
+                    help='encoder model type')
 parser.add_argument('--save', type=str, default='params.pkl',
                     help='path to save the final model')
 parser.add_argument('--dataset', type=str, default='test', choices=['test', 'valid'],
                     help='type of dataset for prediction')
 parser.add_argument('--mode', type=int, default=0, choices=[0, 1, 2],
                     help='train(0)/resume(1)/evaluation(2)/predict_individual(3)')
-parser.add_argument('--type', type=int, default=0, choices=[0, 1, 2],
-                    help='person(0)/animal(1)/wikibio(2)')
+parser.add_argument('--type', type=int, default=0, choices=[0, 1, 2, 3],
+                    help='person(0)/animal(1)/wikibio(2)/rotowire(3)')
 parser.add_argument('--mask', action='store_true',
                     help='false(0)/true(1)')
 parser.add_argument('--batch', type=int, default='64',
@@ -72,7 +74,7 @@ parser.add_argument('--field_context', action='store_false',
 parser.add_argument('--context_mlp', action='store_true',
                     help='MLP layer on context vectors before output layer')
 
-parser.add_argument('--shuffle', action='store_false',
+parser.add_argument('--shuffle', action='store_true',
                     help='whether to shuffle the batches during each epoch')
 
 parser.add_argument('--fig', action='store_true',
@@ -112,6 +114,10 @@ if args.type == 2:
     config = ConfigWikibio()
     # from utils.loader_wikibio import Table2text_seq
     from utils.loader_wikibio_pt import Table2text_seq
+elif args.type == 3:
+    config = ConfigRotowire()
+    args.field_concat_pos = True
+    from utils.loader_rotowire_pt import Table2text_seq
 else:
     config = Config()
     from utils.loader import Table2text_seq
@@ -276,29 +282,46 @@ if __name__ == "__main__":
     # -------------------------------------------------------------------------------------------------- #
     L.info("Building Model ...")
     embedding = nn.Embedding(t_dataset.vocab.size, config.emsize, padding_idx=0)
-    pos_size = t_dataset.max_p
-    pemsize = config.pemsize
-    pos_embedding = nn.Embedding(pos_size, pemsize, padding_idx=0)
-    if args.type == 2:
+
+    if args.type == 3:
         assert hasattr(t_dataset.vocab, 'field_vocab_size')
-        field_embedding = nn.Embedding(t_dataset.vocab.field_vocab_size, config.fdsize, padding_idx=0)
+        assert hasattr(t_dataset.vocab, 'rcd_vocab_size')
+        assert hasattr(t_dataset.vocab, 'ha_vocab_size')
         hidden_size = config.hdsize
         fd_size = config.fdsize
+        rcd_size = config.rcdsize
+        ha_size = config.hasize
+        field_embedding = nn.Embedding(t_dataset.vocab.field_vocab_size, fd_size, padding_idx=0)
+        rcd_embedding = nn.Embedding(t_dataset.vocab.rcd_vocab_size, rcd_size, padding_idx=0)
+        ha_embedding = nn.Embedding(t_dataset.vocab.ha_vocab_size, ha_size, padding_idx=0)
+        posit_size = rcd_size + ha_size
+        pos_embedding = (rcd_embedding, ha_embedding)
     else:
-        field_embedding = None
-        hidden_size = config.emsize
-        fd_size = config.emsize
+        pos_vocab_size = t_dataset.max_p
+        pos_embedding = nn.Embedding(pos_vocab_size, config.pemsize, padding_idx=0)
+        posit_size = config.pemsize * 2
+
+        if args.type == 2:
+            assert hasattr(t_dataset.vocab, 'field_vocab_size')
+            field_embedding = nn.Embedding(t_dataset.vocab.field_vocab_size, config.fdsize, padding_idx=0)
+            hidden_size = config.hdsize
+            fd_size = config.fdsize
+        else:
+            field_embedding = None
+            hidden_size = config.emsize
+            fd_size = config.emsize
 
     encoder = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding,
                          embed_size=config.emsize, fdsize=fd_size,
-                         hidden_size=hidden_size, pos_size=pos_size, pemsize=pemsize,
+                         hidden_size=hidden_size, posit_size=posit_size,
                          attn_src=args.attn_src,
                          input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers,
                          rnn_cell=config.cell, directions=config.directions,
                          variable_lengths=True, field_concat_pos=args.field_concat_pos,
-                         field_embedding=field_embedding, pos_embedding=pos_embedding)
+                         field_embedding=field_embedding, pos_embedding=pos_embedding,
+                         dataset_type=args.type, enc_type=args.enc_type)
     decoder = DecoderRNN(dec_type=args.dec_type, vocab_size=t_dataset.vocab.size, embedding=embedding,
-                         embed_size=config.emsize, hidden_size=hidden_size, fdsize=fd_size, pemsize=config.pemsize,
+                         embed_size=config.emsize, hidden_size=hidden_size, fdsize=fd_size, posit_size=posit_size,
                          sos_id=3, eos_id=2, unk_id=1,
                          rnn_cell=config.cell, directions=config.directions,
                          attn_src=args.attn_src, attn_level=args.attn_level,
@@ -308,7 +331,7 @@ if __name__ == "__main__":
                          field_context=args.field_context, context_mlp=args.context_mlp,
                          mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen, max_len=args.max_len,
                          input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers,
-                         field_embedding=field_embedding, pos_embedding=pos_embedding)
+                         field_embedding=field_embedding, pos_embedding=pos_embedding, dataset_type=args.type)
 
     model = Seq2seq(encoder, decoder).to(device)
     optimizer = optim.Adam(model.parameters(), lr=config.lr)

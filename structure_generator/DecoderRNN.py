@@ -10,7 +10,7 @@ from .baseRNN import BaseRNN
 
 class DecoderRNN(BaseRNN):
 
-    def __init__(self, dec_type='pg', vocab_size=0, embedding=None, embed_size=0, hidden_size=0, fdsize=0, pemsize=0,
+    def __init__(self, dec_type='pg', vocab_size=0, embedding=None, embed_size=0, hidden_size=0, fdsize=0, posit_size=0,
                  sos_id=3, eos_id=2, unk_id=1,
                  rnn_cell='gru', directions=2,
                  attn_src='emb', attn_type='concat', attn_fuse='sum', attn_level=2,
@@ -18,9 +18,9 @@ class DecoderRNN(BaseRNN):
                  field_self_att=False, field_concat_pos=False, field_context=False, context_mlp=False,
                  mask=False, use_cuda=True, unk_gen=False,
                  n_layers=1, input_dropout_p=0, dropout_p=0, max_len=100, lmbda=1.5,
-                 field_embedding=None, pos_embedding=None):
-
-        super(DecoderRNN, self).__init__(vocab_size, hidden_size, input_dropout_p, dropout_p, n_layers, rnn_cell)
+                 field_embedding=None, pos_embedding=None, dataset_type=0):
+        self.rnn_type = rnn_cell.lower()
+        super(DecoderRNN, self).__init__(vocab_size, hidden_size, input_dropout_p, dropout_p, n_layers)
 
         self.decoder_type = dec_type
         self.attn_src = attn_src
@@ -44,18 +44,24 @@ class DecoderRNN(BaseRNN):
         self.unk_gen = unk_gen
         self.embedding = embedding
         self.field_embedding = field_embedding
-        self.pos_embedding = pos_embedding
+        self.dataset_type = dataset_type
+        if self.dataset_type == 3:
+            self.pos_embedding, self.rpos_embedding = pos_embedding
+        else:
+            self.pos_embedding = pos_embedding
+            self.rpos_embedding = self.pos_embedding
         self.lmbda = lmbda
         self.use_cuda = use_cuda
         if self.decoder_type != 'pg':
             self.criterion = nn.CrossEntropyLoss(reduction='none')
 
         # ----------------- params for directions ----------------- #
+        # TODO: this bridge should have Relu/Elu
         if self.directions == 2:
             self.W_enc_state = nn.Linear(hidden_size * 2, hidden_size)
 
         # ----------------- parameters for self attention ----------------- #
-        self_size = pemsize * 2
+        self_size = posit_size
         if self.field_self_att:
             self.Win = nn.Linear(self_size, self_size)
             self.Wout = nn.Linear(self_size, self_size)
@@ -158,7 +164,7 @@ class DecoderRNN(BaseRNN):
 
         # ----------------- params for rnn cell ----------------- #
         if self.decoder_type == 'pt':
-            self.rnn = self.rnn_cell(embed_size + fdsize, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
+            self.rnn = self.rnn_cell(embed_size + fdsize + posit_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
         else:
             self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
 
@@ -521,9 +527,9 @@ class DecoderRNN(BaseRNN):
         """
 
         if self.decoder_type == 'pt':
-            # targets, f_t, pf_t, pb_t, lab_t = targets
             if targets is not None:
-                targets, f_t, lab_t = targets
+                targets, f_t, pf_t, pb_t, lab_t = targets
+                # targets, f_t, lab_t = targets
 
         targets, batch_size, max_length, max_enc_len = self._validate_args(targets, enc_state, enc_input, teacher_forcing_ratio)
 
@@ -552,8 +558,8 @@ class DecoderRNN(BaseRNN):
             enc_field_vals = enc_field
 
         if teacher_forcing_ratio:
-            if isinstance(targets, tuple):
-                targets, f_t, lab_t = targets
+            # if isinstance(targets, tuple):
+            #     targets, f_t, lab_t = targets
 
             lm_loss, cov_loss = [], []
             dec_lens = (targets > 0).float().sum(1)
@@ -561,12 +567,12 @@ class DecoderRNN(BaseRNN):
             embedded = self.embedding(targets)
             if self.decoder_type == 'pt':
                 embed_field = self.field_embedding(f_t)
-                # embed_pf = self.pos_embedding(pf_t)
-                # embed_pb = self.pos_embedding(pb_t)
-                # embed_pos = torch.cat((embed_pf, embed_pb), dim=2)
-                # embed_field_pos = torch.cat((embed_field, embed_pos), dim=2)
-                # embedded = torch.cat((embedded, embed_field_pos), dim=2)
-                embedded = torch.cat((embedded, embed_field), dim=2)
+                embed_pf = self.pos_embedding(pf_t)
+                embed_pb = self.rpos_embedding(pb_t)
+                embed_pos = torch.cat((embed_pf, embed_pb), dim=2)
+                embed_field_pos = torch.cat((embed_field, embed_pos), dim=2)
+                embedded = torch.cat((embedded, embed_field_pos), dim=2)
+                # embedded = torch.cat((embedded, embed_field), dim=2)
 
             decoder_inputs = self.input_dropout(embedded)
 
@@ -647,15 +653,15 @@ class DecoderRNN(BaseRNN):
 
         if self.decoder_type == 'pt':
             # targets, f_t, pf_t, pb_t, lab_t = targets
-            targets, f_t, _ = targets
+            targets, f_t, pf_t, pb_t = targets
             embedded = self.embedding(targets)
             embed_field = self.field_embedding(f_t)
-            # embed_pf = self.pos_embedding(pf_t)
-            # embed_pb = self.pos_embedding(pb_t)
-            # embed_pos = torch.cat((embed_pf, embed_pb), dim=2)
-            # embed_field_pos = torch.cat((embed_field, embed_pos), dim=2)
-            # embedded = torch.cat((embedded, embed_field_pos), dim=2)
-            embedded = torch.cat((embedded, embed_field), dim=2)
+            embed_pf = self.pos_embedding(pf_t)
+            embed_pb = self.rpos_embedding(pb_t)
+            embed_pos = torch.cat((embed_pf, embed_pb), dim=2)
+            embed_field_pos = torch.cat((embed_field, embed_pos), dim=2)
+            embedded = torch.cat((embedded, embed_field_pos), dim=2)
+            # embedded = torch.cat((embedded, embed_field), dim=2)
         else:
             embedded = self.embedding(targets)
 
@@ -818,9 +824,13 @@ class DecoderRNN(BaseRNN):
                 targets = targets.cuda()
             if self.decoder_type == 'pt':
                 fields = torch.LongTensor([self.sos_id] * batch_size).view(batch_size, 1)
+                pos = torch.LongTensor([self.sos_id] * batch_size).view(batch_size, 1)
+                rpos = torch.LongTensor([self.sos_id] * batch_size).view(batch_size, 1)
                 if self.use_cuda:
                     fields = fields.cuda()
-                targets = (targets, fields, None)
+                    pos = pos.cuda()
+                    rpos = rpos.cuda()
+                targets = (targets, fields, pos, rpos)
             max_length = self.max_length
         else:
             max_length = targets.size(1) - 1     # minus the start of sequence symbol
