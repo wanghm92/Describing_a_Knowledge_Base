@@ -34,6 +34,28 @@ class ConfigWikibio(object):
         self.max_len = 100
         self.unk_gen = True  # allow generating UNK
 
+class ConfigRotowire(object):
+    def __init__(self):
+        self.cell = "LSTM"
+        self.emsize = 256
+        self.fdsize = 128
+        self.rcdsize = 64
+        self.hasize = 64
+        self.hdsize = 512
+        # self.emsize = 256
+        # self.fdsize = 64
+        # self.hdsize = 256
+        self.pemsize = 5
+        self.nlayers = 1
+        self.lr = 0.0003
+        self.epochs = 60
+        self.batch_size = 32
+        self.dropout = 0
+        self.directions = 1
+        self.max_grad_norm = 5
+        self.max_len = 100
+        self.unk_gen = True  # allow generating UNK
+
 class ConfigSmall(object):
     def __init__(self):
         self.cell = "GRU"
