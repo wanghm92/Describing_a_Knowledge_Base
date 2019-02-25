@@ -38,6 +38,7 @@ class Predictor(object):
         refs = {}
         cands = {}
         cands_ids = {} if self.decoder_type == 'pt' and self.dataset_type == 3 else None
+        tgts_ids = {} if self.decoder_type == 'pt' and self.dataset_type == 3 else None
         cands_with_pgens = {} if self.decoder_type == 'pg' else None
         cands_with_unks = {} if self.unk_gen else None
         srcs = {}
@@ -47,40 +48,35 @@ class Predictor(object):
         eval_loss = 0
         figs_per_batch = 1
         total_batches = len(dataset.corpus)
+
         print("{} batches to be evaluated".format(total_batches))
         for batch_idx in tqdm(range(total_batches)):
-            batch_s, batch_o_s, batch_f, batch_pf, batch_pb, sources, targets, fields, list_oovs, source_len, \
-                max_source_oov, w2fs = dataset.get_batch(batch_idx)
-            decouts, lens, losses, p_gens, selfatt, attns = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
+            batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_t, batch_o_t, source_len, max_source_oov, \
+            w2fs, sources, targets, fields, list_oovs = dataset.get_batch(batch_idx)
+
+
+            decouts, locations, lens, losses, p_gens, selfatt, attns = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
                                                                        w2fs=w2fs, input_lengths=source_len,
                                                                        max_source_oov=max_source_oov, fig=True)
-
-            if isinstance(decouts, tuple):
-                decouts, locations = decouts
-            # if self.decoder_type == 'pt' and
-            #
-            #     continue
-
-            # print('decouts: {}'.format(decouts.size()))
-            # print('lens: {}'.format(lens))
-            # print('losses: {}'.format(losses))
-            # print('attns: {}'.format(attns.size()))
-            # NOTE: fields is a dictionary of all feats for ptr-net
-
+            batch_t = batch_t[0]
             eval_loss += sum(losses)/len(losses)
             for j in range(len(lens)):
                 i += 1
                 srcs[i] = ' '.join(['_'.join(x.split()) for x in sources[j]])
 
+                # NOTE: fields is a dictionary of all feats for ptr-net
                 for k, v in fields.items():
                     feats[k][i] = ' '.join(v[j])
 
                 refs[i] = [' '.join(targets[j])]
                 out_seq_clean = []
                 out_seq_unk = []
-                out_seq_ids = locations[j].tolist()
-                out_seq_ids = out_seq_ids[:lens[j]-1]
-                cands_ids[i] = out_seq_ids
+                if locations is not None:
+                    out_seq_ids = locations[j].tolist()
+                    out_seq_ids = out_seq_ids[:lens[j]-1]
+                    cands_ids[i] = out_seq_ids
+                    tgt_seq_ids = [x for x in batch_t[j].tolist() if x != 2 and x != 3]
+                    tgts_ids[i] = tgt_seq_ids
 
                 for k in range(lens[j]):
                     # get tokens and replace OOVs
@@ -109,7 +105,7 @@ class Predictor(object):
                 if self.unk_gen:
                     cands_with_unks[i] = ' '.join(out_unk)
 
-        others = (cands_with_unks, cands_with_pgens, cands_ids, srcs, feats)
+        others = (cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats)
 
         return cands, refs, eval_loss/total_batches, others
 

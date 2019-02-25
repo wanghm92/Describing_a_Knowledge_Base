@@ -39,7 +39,7 @@ parser.add_argument('--save', type=str, default='params.pkl',
 parser.add_argument('--dataset', type=str, default='test', choices=['test', 'valid'],
                     help='type of dataset for prediction')
 parser.add_argument('--mode', type=int, default=0, choices=[0, 1, 2],
-                    help='train(0)/resume(1)/evaluation(2)/predict_individual(3)')
+                    help='train(0)/resume(1)/evaluation(2)')
 parser.add_argument('--type', type=int, default=0, choices=[0, 1, 2, 3],
                     help='person(0)/animal(1)/wikibio(2)/rotowire(3)')
 parser.add_argument('--mask', action='store_true',
@@ -207,12 +207,11 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
                               decoder_type=args.dec_type, unk_gen=config.unk_gen, dataset_type=args.type)
         L.info("Start Evaluating ...")
         cand, ref, eval_loss, others = predictor.preeval_batch(v_dataset)
-        cands_with_unks, cands_with_pgens, cands_ids, srcs, feats = others
+        cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats = others
+
         writer.add_scalar('valid/loss', eval_loss, epoch)
         L.info('Result:')
         L.info('eval_loss: {}'.format(eval_loss))
-        L.info('\nref[1]: {}'.format(ref[1][0]))
-        L.info('\ncand[1]: {}'.format(cand[1]))
         L.info('\nsource[1]: {}'.format(srcs[1]))
         for k, v in feats.items():
             L.info('\n{}[1]: {}'.format(k, v[1]))
@@ -222,6 +221,8 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
             L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
         if cands_ids is not None:
             L.info('\ncands_ids[1]: {}'.format(cands_ids[1]))
+        L.info('\nref[1]: {}'.format(ref[1][0]))
+        L.info('\ncand[1]: {}'.format(cand[1]))
 
         eval_file_out = "{}/evaluations/valid.epoch_{}.cand.live.txt".format(save_file_dir, epoch)
         with open(eval_file_out, 'w+') as fout:
@@ -244,17 +245,25 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
                     fout.write("{}\n".format(" ".join([str(x) for x in cands_ids[c + 1]])))
 
         # --------------------------------------- evaluation -------------------------------------------- #
-        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=epoch)
+        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=epoch, cands_ids=cands_ids, tgts_ids=tgts_ids)
         rouge_l = final_scores['ROUGE_L']
         bleu_1 = final_scores['Bleu_1']
         bleu_2 = final_scores['Bleu_2']
         bleu_3 = final_scores['Bleu_3']
         bleu_4 = final_scores['Bleu_4']
+        precision = final_scores['precision']
+        recall = final_scores['recall']
+        f1 = final_scores['f1']
+        dis = final_scores['ndld']
         writer.add_scalar('valid/ROUGE_L', rouge_l, epoch)
         writer.add_scalar('valid/Bleu_1', bleu_1, epoch)
         writer.add_scalar('valid/Bleu_2', bleu_2, epoch)
         writer.add_scalar('valid/Bleu_3', bleu_3, epoch)
         writer.add_scalar('valid/Bleu_4', bleu_4, epoch)
+        writer.add_scalar('valid/precision', precision, epoch)
+        writer.add_scalar('valid/recall', recall, epoch)
+        writer.add_scalar('valid/f1', f1, epoch)
+        writer.add_scalar('valid/ndld', dis, epoch)
 
         # ------------------------------------------ save ----------------------------------------------- #
         if bleu_4 >= best_dev_bleu and rouge_l >= best_dev_rouge:
@@ -283,6 +292,7 @@ if __name__ == "__main__":
     # -------------------------------------------------------------------------------------------------- #
     # ------------------------------------- Reading Datasets ------------------------------------------- #
     # -------------------------------------------------------------------------------------------------- #
+    eval_f = Evaluate()
     L.info("Reading training data ...")
     t_dataset = Table2text_seq('train', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size,
                                train_mode=args.mode, dec_type=args.dec_type)
@@ -417,8 +427,8 @@ if __name__ == "__main__":
 
         L.info("Start Evaluating ...")
         cand, ref, eval_loss, others = predictor.preeval_batch(dataset)
-        args.dec_type
-        cands_with_unks, cands_with_pgens, cands_ids, srcs, feats = others
+        cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats = others
+
         L.info('Result:')
         L.info('eval_loss: {}'.format(eval_loss))
         L.info('\nref[1]: {}'.format(ref[1][0]))
@@ -432,6 +442,8 @@ if __name__ == "__main__":
             L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
         if cands_ids is not None:
             L.info('\ncands_ids[1]: {}'.format(cands_ids[1]))
+
+        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=load_epoch, cands_ids=cands_ids, tgts_ids=tgts_ids)
     # ----------------------------------- evaluation ---------------------------------------- #
     elif args.mode == 2:
         model.load_state_dict(torch.load(args.save))
@@ -447,12 +459,10 @@ if __name__ == "__main__":
 
         L.info("Start Evaluating ...")
         cand, ref, eval_loss, others = predictor.preeval_batch(dataset, fig=args.fig, save_dir=save_file_dir)
-        cands_with_unks, cands_with_pgens, cands_ids, srcs, feats = others
+        cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats = others
 
         L.info('Result:')
         L.info('eval_loss: {}'.format(eval_loss))
-        L.info('\nref[1]: {}'.format(ref[1][0]))
-        L.info('\ncand[1]: {}'.format(cand[1]))
         L.info('\nsource[1]: {}'.format(srcs[1]))
         for k, v in feats.items():
             L.info('\n{}[1]: {}'.format(k, v[1]))
@@ -462,6 +472,8 @@ if __name__ == "__main__":
             L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
         if cands_ids is not None:
             L.info('\ncands_ids[1]: {}'.format(cands_ids[1]))
+        L.info('\nref[1]: {}'.format(ref[1][0]))
+        L.info('\ncand[1]: {}'.format(cand[1]))
 
         cand_file_out = "{}/evaluations/{}.epoch_{}.cand.txt".format(save_file_dir, args.dataset, load_epoch)
         with open(cand_file_out, 'w+') as fout:
@@ -511,35 +523,4 @@ if __name__ == "__main__":
             for f in range(len(feats['fields'])):
                 fout.write("{}\n".format(feats['fields'][f+1]))
 
-        eval_f = Evaluate()
-        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=load_epoch)
-
-    # ------------------------------------ predict one ----------------------------------------- #
-    elif args.mode == 3:
-        model.load_state_dict(torch.load(args.save))
-        load_epoch = int(args.save.split('.')[-1])
-        L.info("model restored from epoch-{}: {}".format(load_epoch, args.save))
-
-        dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda, batch_size=1, dec_type=args.dec_type)
-        L.info("Read $-{}-$ data".format(args.dataset))
-        predictor = Predictor(model, dataset.vocab, args.cuda, decoder_type=args.dec_type, unk_gen=config.unk_gen)
-
-        while True:
-            seq_str = input("Type index from (%d to %d) to continue:\n" %(0, dataset.len - 1))
-            i = int(seq_str)
-            batch_s, batch_o_s, batch_f, batch_pf, batch_pb, sources, targets, fields, list_oovs, source_len \
-                , max_source_oov, w2fs = dataset.get_batch(i)
-            table = []
-            for i in range(len(sources[0])):
-                table.append(fields[0][i])
-                table.append(":")
-                table.append(sources[0][i])
-            L.info("Table:")
-            L.info(' '.join(table)+'\n')
-            L.info("Refer: ")
-            L.info(' '.join(targets[0])+'\n')
-            outputs = predictor.predict(batch_s, batch_o_s, batch_f, batch_pf, batch_pb, max_source_oov
-                                        , source_len, list_oovs[0], w2fs)
-            L.info("Result: ")
-            L.info(outputs)
-            L.info('-'*120)
+        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=load_epoch, cands_ids=cands_ids, tgts_ids=tgts_ids)

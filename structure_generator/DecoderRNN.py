@@ -670,6 +670,7 @@ class DecoderRNN(BaseRNN):
         # weighted_coverage = coverage.clone()
         # step through decoder hidden states
         for step in range(max_length):
+            # TODO: set min_length
             dec_hidden, _c = self.rnn(decoder_input, decoder_hidden_init)
             logits_or_prob, attn_weights, (p_gen, src_prob) = self._decode_step(batch_size, input_ids, coverage,
                                                                                 max_source_oov,
@@ -741,6 +742,7 @@ class DecoderRNN(BaseRNN):
                 # print('dec_field_input: {}'.format(dec_field_input.size()))
                 decoder_input = torch.cat((dec_word_input, dec_field_input), dim=2)
             else:
+                locations = None
                 decoder_input = self.embedding(symbols)
 
             decoder_hidden_init = _c
@@ -769,13 +771,13 @@ class DecoderRNN(BaseRNN):
         if self.decoder_type == 'pg':
             p_gens = torch.stack(p_gens, 1).squeeze(2)
 
+        locations = torch.stack(locations, 1).squeeze(2) if locations is not None else None
         if fig:
             self_matrix = f_matrix if self.field_self_att else None
-            return (torch.stack(decoded_outputs, 1).squeeze(2), torch.stack(locations, 1).squeeze(2)), \
-                   lengths.tolist(), losses, p_gens, self_matrix, torch.stack(attn, 1).squeeze(2)
+            return torch.stack(decoded_outputs, 1).squeeze(2), locations, lengths.tolist(), losses, p_gens, \
+                   self_matrix, torch.stack(attn, 1).squeeze(2)
         else:
-            return (torch.stack(decoded_outputs, 1).squeeze(2), torch.stack(locations, 1).squeeze(2)), \
-                   lengths.tolist(), losses, p_gens
+            return torch.stack(decoded_outputs, 1).squeeze(2), locations, lengths.tolist(), losses, p_gens
 
     def _init_state(self, enc_state):
         """ Initialize the encoder hidden state. """

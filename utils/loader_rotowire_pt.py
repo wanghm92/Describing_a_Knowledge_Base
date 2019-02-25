@@ -577,8 +577,8 @@ class Table2text_seq:
                 rcds = [i[:max(source_len)] for i in rcds]
                 has = [i[:max(source_len)] for i in has]
                 fields = {'fields': fields, 'rcds': rcds, 'has': has}
-            return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, targets, sources, fields, list_oovs, source_len, \
-                max_source_oov, w2fs
+            return batch_s, batch_o_s, batch_t, batch_o_t, batch_f, batch_pf, batch_pb, source_len, max_source_oov, \
+                   w2fs, targets, sources, fields, list_oovs
         else:
             return batch_s, batch_o_s, batch_t, batch_o_t, batch_f, batch_pf, batch_pb, source_len, max_source_oov
 
@@ -586,33 +586,32 @@ class Table2text_seq:
         if self.data_src == 'train':
             batch_s, batch_o_s, batch_t, batch_o_t, batch_f, batch_pf, batch_pb, source_len, max_source_oov \
                 = self.corpus[index]
-            batch_s = batch_s.to(self.device)
-            batch_o_s = batch_o_s.to(self.device)
-            if self.dec_type == 'pt':
-                batch_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t = batch_t
-                batch_t = batch_t.to(self.device)
-                batch_f_t = batch_f_t.to(self.device)
-                batch_pf_t = batch_pf_t.to(self.device)
-                batch_pb_t = batch_pb_t.to(self.device)
-                batch_lab_t = batch_lab_t.to(self.device)
-                batch_t = (batch_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t)  # NOTE: batch_t is now a tuple
-                # batch_t = (batch_t, batch_f_t, batch_lab_t)  # NOTE: batch_t is now a tuple
-            else:
-                batch_t = batch_t.to(self.device)
+        else:
+            batch_s, batch_o_s, batch_t, batch_o_t, batch_f, batch_pf, batch_pb, source_len, max_source_oov, \
+            w2fs, targets, sources, fields, list_oovs = self.corpus[index]
 
-            batch_o_t = batch_o_t.to(self.device)
-            batch_f = batch_f.to(self.device)
-            batch_pf = batch_pf.to(self.device)
-            batch_pb = batch_pb.to(self.device)
+        batch_s = batch_s.to(self.device)
+        batch_o_s = batch_o_s.to(self.device)
+        if self.dec_type == 'pt':
+            batch_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t = batch_t
+            batch_t = batch_t.to(self.device)
+            batch_f_t = batch_f_t.to(self.device)
+            batch_pf_t = batch_pf_t.to(self.device)
+            batch_pb_t = batch_pb_t.to(self.device)
+            batch_lab_t = batch_lab_t.to(self.device)
+            batch_t = (batch_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t)  # NOTE: batch_t is now a tuple
+            # batch_t = (batch_t, batch_f_t, batch_lab_t)  # NOTE: batch_t is now a tuple
+        else:
+            batch_t = batch_t.to(self.device)
+
+        batch_o_t = batch_o_t.to(self.device)
+        batch_f = batch_f.to(self.device)
+        batch_pf = batch_pf.to(self.device)
+        batch_pb = batch_pb.to(self.device)
+
+        if self.data_src == 'train':
             return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_t, batch_o_t, source_len, max_source_oov
         else:
-            batch_s, batch_o_s, batch_f, batch_pf, batch_pb, targets, sources, fields, list_oovs, source_len, \
-                max_source_oov, w2fs = self.corpus[index]
-            batch_s = batch_s.to(self.device)
-            batch_o_s = batch_o_s.to(self.device)
-            batch_f = batch_f.to(self.device)
-            batch_pf = batch_pf.to(self.device)
-            batch_pb = batch_pb.to(self.device)
-            return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, sources, targets, fields, list_oovs, source_len, \
-                max_source_oov, w2fs
+            return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_t, batch_o_t, source_len, max_source_oov, \
+                   w2fs, sources, targets, fields, list_oovs
 
