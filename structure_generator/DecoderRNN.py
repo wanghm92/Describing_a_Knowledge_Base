@@ -646,6 +646,7 @@ class DecoderRNN(BaseRNN):
         no_dup_mask = np.ones((batch_size, max_enc_len), dtype=np.float32)
         losses = []
         decoded_outputs = []
+        locations = [] if self.decoder_type == 'pt' else None
         src_probs = [] if self.decoder_type == 'pg' else None
         p_gens = [] if self.decoder_type == 'pg' else None
         if fig:
@@ -670,7 +671,6 @@ class DecoderRNN(BaseRNN):
         # step through decoder hidden states
         for step in range(max_length):
             dec_hidden, _c = self.rnn(decoder_input, decoder_hidden_init)
-            # TODO combined_vocab to be changed to logits_or_prob
             logits_or_prob, attn_weights, (p_gen, src_prob) = self._decode_step(batch_size, input_ids, coverage,
                                                                                 max_source_oov,
                                                                                 dec_hidden.squeeze(1),
@@ -703,10 +703,9 @@ class DecoderRNN(BaseRNN):
             if self.decoder_type == 'pt':
                 # print('input_ids: {}'.format(input_ids.size()))
                 symbols = input_ids.gather(1, symbols_or_positions)
+                positions = symbols_or_positions
             else:
                 symbols = symbols_or_positions
-
-            # print('symbols: {}'.format(symbols.size()))
 
             if self.mask:
                 tmp_mask = torch.zeros_like(enc_mask, dtype=torch.uint8)
@@ -732,6 +731,7 @@ class DecoderRNN(BaseRNN):
                         symbols[i] = w2f[symbols[i].item()]
             # symbols.masked_fill_((symbols > self.vocab_size-1), self.unk_id)
             if self.decoder_type == 'pt':
+                locations.append(positions.clone())
                 # print('enc_input_vals: {}'.format(enc_input_vals.size()))
                 # print('enc_field_vals: {}'.format(enc_field_vals.size()))
                 # print('symbols_or_positions: {}'.format(symbols_or_positions.size()))
@@ -771,10 +771,11 @@ class DecoderRNN(BaseRNN):
 
         if fig:
             self_matrix = f_matrix if self.field_self_att else None
-            return torch.stack(decoded_outputs, 1).squeeze(2), lengths.tolist(), losses, p_gens, self_matrix, \
-                   torch.stack(attn, 1).squeeze(2)
+            return (torch.stack(decoded_outputs, 1).squeeze(2), torch.stack(locations, 1).squeeze(2)), \
+                   lengths.tolist(), losses, p_gens, self_matrix, torch.stack(attn, 1).squeeze(2)
         else:
-            return torch.stack(decoded_outputs, 1).squeeze(2), lengths.tolist(), losses, p_gens
+            return (torch.stack(decoded_outputs, 1).squeeze(2), torch.stack(locations, 1).squeeze(2)), \
+                   lengths.tolist(), losses, p_gens
 
     def _init_state(self, enc_state):
         """ Initialize the encoder hidden state. """

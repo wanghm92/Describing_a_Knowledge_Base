@@ -14,6 +14,7 @@ from tensorboardX import SummaryWriter
 from tqdm import tqdm
 import numpy as np
 
+DELIM = u"￨"
 program = os.path.basename(sys.argv[0])
 L = logging.getLogger(program)
 logging.basicConfig(format='%(asctime)s: %(levelname)s: %(message)s')
@@ -202,21 +203,25 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         writer.add_scalar('loss/epoch_loss', epoch_loss, epoch)
 
         # --------------------------------------- inference -------------------------------------------- #
-        predictor = Predictor(model, v_dataset.vocab, args.cuda, decoder_type=args.dec_type, unk_gen=config.unk_gen)
+        predictor = Predictor(model, v_dataset.vocab, args.cuda,
+                              decoder_type=args.dec_type, unk_gen=config.unk_gen, dataset_type=args.type)
         L.info("Start Evaluating ...")
         cand, ref, eval_loss, others = predictor.preeval_batch(v_dataset)
-        cands_with_unks, cands_with_pgens, srcs, fds = others
+        cands_with_unks, cands_with_pgens, cands_ids, srcs, feats = others
         writer.add_scalar('valid/loss', eval_loss, epoch)
         L.info('Result:')
         L.info('eval_loss: {}'.format(eval_loss))
         L.info('\nref[1]: {}'.format(ref[1][0]))
         L.info('\ncand[1]: {}'.format(cand[1]))
         L.info('\nsource[1]: {}'.format(srcs[1]))
-        L.info('\nfield[1]: {}'.format(fds[1]))
+        for k, v in feats.items():
+            L.info('\n{}[1]: {}'.format(k, v[1]))
         if config.unk_gen:
             L.info('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
         if cands_with_pgens is not None:
             L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
+        if cands_ids is not None:
+            L.info('\ncands_ids[1]: {}'.format(cands_ids[1]))
 
         eval_file_out = "{}/evaluations/valid.epoch_{}.cand.live.txt".format(save_file_dir, epoch)
         with open(eval_file_out, 'w+') as fout:
@@ -232,6 +237,11 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
             with open(eval_file_out_pgen, 'w+') as fout:
                 for c in range(len(cands_with_pgens)):
                     fout.write("{}\n".format(cands_with_pgens[c + 1]))
+        if cands_ids is not None:
+            eval_file_out_ids = "{}/evaluations/valid.epoch_{}.cand.ids.txt".format(save_file_dir, epoch)
+            with open(eval_file_out_ids, 'w+') as fout:
+                for c in range(len(cands_ids)):
+                    fout.write("{}\n".format(" ".join([str(x) for x in cands_ids[c + 1]])))
 
         # --------------------------------------- evaluation -------------------------------------------- #
         final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=epoch)
@@ -401,23 +411,27 @@ if __name__ == "__main__":
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda,
                                  batch_size=config.batch_size, dec_type=args.dec_type)
         L.info("Read $-{}-$ data".format(args.dataset))
-        predictor = Predictor(model, dataset.vocab, args.cuda, decoder_type=args.dec_type, unk_gen=config.unk_gen)
+        predictor = Predictor(model, dataset.vocab, args.cuda,
+                              decoder_type=args.dec_type, unk_gen=config.unk_gen, dataset_type=args.type)
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
         cand, ref, eval_loss, others = predictor.preeval_batch(dataset)
-        cands_with_unks, cands_with_pgens, srcs, fds = others
+        args.dec_type
+        cands_with_unks, cands_with_pgens, cands_ids, srcs, feats = others
         L.info('Result:')
         L.info('eval_loss: {}'.format(eval_loss))
         L.info('\nref[1]: {}'.format(ref[1][0]))
         L.info('\ncand[1]: {}'.format(cand[1]))
         L.info('\nsource[1]: {}'.format(srcs[1]))
-        L.info('\nfield[1]: {}'.format(fds[1]))
+        for k, v in feats.items():
+            L.info('\n{}[1]: {}'.format(k, v[1]))
         if config.unk_gen:
             L.info('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
         if cands_with_pgens is not None:
             L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
-
+        if cands_ids is not None:
+            L.info('\ncands_ids[1]: {}'.format(cands_ids[1]))
     # ----------------------------------- evaluation ---------------------------------------- #
     elif args.mode == 2:
         model.load_state_dict(torch.load(args.save))
@@ -427,22 +441,27 @@ if __name__ == "__main__":
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda,
                                  batch_size=config.batch_size, dec_type=args.dec_type)
         L.info("Read $-{}-$ data".format(args.dataset))
-        predictor = Predictor(model, dataset.vocab, args.cuda, decoder_type=args.dec_type, unk_gen=config.unk_gen)
+        predictor = Predictor(model, dataset.vocab, args.cuda,
+                              decoder_type=args.dec_type, unk_gen=config.unk_gen, dataset_type=args.type)
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
         cand, ref, eval_loss, others = predictor.preeval_batch(dataset, fig=args.fig, save_dir=save_file_dir)
-        cands_with_unks, cands_with_pgens, srcs, fds = others
+        cands_with_unks, cands_with_pgens, cands_ids, srcs, feats = others
+
         L.info('Result:')
         L.info('eval_loss: {}'.format(eval_loss))
         L.info('\nref[1]: {}'.format(ref[1][0]))
         L.info('\ncand[1]: {}'.format(cand[1]))
         L.info('\nsource[1]: {}'.format(srcs[1]))
-        L.info('\nfield[1]: {}'.format(fds[1]))
+        for k, v in feats.items():
+            L.info('\n{}[1]: {}'.format(k, v[1]))
         if config.unk_gen:
             L.info('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
         if cands_with_pgens is not None:
             L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
+        if cands_ids is not None:
+            L.info('\ncands_ids[1]: {}'.format(cands_ids[1]))
 
         cand_file_out = "{}/evaluations/{}.epoch_{}.cand.txt".format(save_file_dir, args.dataset, load_epoch)
         with open(cand_file_out, 'w+') as fout:
@@ -461,6 +480,12 @@ if __name__ == "__main__":
                 for c in range(len(cands_with_unks)):
                     fout.write("{}\n".format(cands_with_unks[c+1]))
 
+        if cands_ids is not None:
+            eval_file_out_ids = "{}/evaluations/{}.epoch_{}.cand.ids.txt".format(save_file_dir, args.dataset, load_epoch)
+            with open(eval_file_out_ids, 'w+') as fout:
+                for c in range(len(cands_ids)):
+                    fout.write("{}\n".format(" ".join([str(x) for x in cands_ids[c + 1]])))
+
         ref_file_out = "{}/evaluations/{}.ref.sum.txt".format(save_file_dir, args.dataset)
         with open(ref_file_out, 'w+') as fout:
             for r in range(len(ref)):
@@ -471,10 +496,20 @@ if __name__ == "__main__":
             for s in range(len(srcs)):
                 fout.write("{}\n".format(srcs[s+1]))
 
+        src_file_onmt = "{}/evaluations/{}.ref.tb.onmt.txt".format(save_file_dir, args.dataset)
+        with open(src_file_onmt, 'w+') as fout:
+            for s in range(len(srcs)):
+                a = srcs[s+1].split()
+                b = feats['fields'][s+1].split()
+                c = feats['rcds'][s+1].split()
+                d = feats['has'][s+1].split()
+                records = [DELIM.join([h,i,j,k]) for h,i,j,k in zip(a,b,c,d)]
+                fout.write("{}\n".format(" ".join(records)))
+
         fd_file_out = "{}/evaluations/{}.ref.tbl.txt".format(save_file_dir, args.dataset)
         with open(fd_file_out, 'w+') as fout:
-            for f in range(len(fds)):
-                fout.write("{}\n".format(fds[f+1]))
+            for f in range(len(feats['fields'])):
+                fout.write("{}\n".format(feats['fields'][f+1]))
 
         eval_f = Evaluate()
         final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=load_epoch)

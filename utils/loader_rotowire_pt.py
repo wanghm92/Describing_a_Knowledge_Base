@@ -34,6 +34,7 @@ class Vocabulary:
             self.size = len(word2idx)
             self.field_vocab_size = len(field2idx)
             self.rcd_vocab_size = len(self.rcd2idx)
+            self.ha_vocab_size = len(self.ha2idx)
 
         else:
             self.word2idx = dict()
@@ -82,7 +83,6 @@ class Vocabulary:
             print(self.field_vocab_size)
             print(self.rcd_vocab_size)
             print(self.ha_vocab_size)
-            # sys.exit(0)
 
     def _build_vocabulary(self, corpus, field):
         assert isinstance(field, tuple)
@@ -279,6 +279,8 @@ class Table2text_seq:
         # TODO: include record type and H/A vocabs
         self.vocab = Vocabulary(word2idx=data["word2idx"], idx2word=data["idx2word"],
                                 field2idx=data["field2idx"], idx2field=data["idx2field"],
+                                rcd2idx=data["rcd2idx"], idx2rcd=data["idx2rcd"],
+                                ha2idx=data["ha2idx"], idx2ha=data["idx2ha"],
                                 dec_type=self.dec_type)
 
         # print("Loading data ** LIGHT ** from {}".format(path))
@@ -445,6 +447,8 @@ class Table2text_seq:
         targets = []
         sources = []
         fields = []
+        rcds = []
+        has = []
         max_source_oov = 0
         for data in sample:
             # print("data: {}".format(data))
@@ -457,7 +461,7 @@ class Table2text_seq:
             table = data[5]
             src_len = len(source)
             if self.dec_type == 'pt':
-                value_t, field_t, rcd_t, ha_t, lab_t = target
+                value_t, field_t, rcd_t, ha_t, lab_t = target  #tokens
                 src_len += 1  # <EOS>
                 tgt_len = len(value_t) + 2   # <EOS> and <SOS>
             else:
@@ -500,6 +504,8 @@ class Table2text_seq:
                 list_oovs.append(idx2word_oov)
                 if self.dec_type == 'pt':
                     targets.append(value_t)  # tokens
+                    rcds.append(rcd)
+                    has.append(ha)
                 else:
                     targets.append(target)  # tokens
                 sources.append(source)  # tokens
@@ -564,9 +570,13 @@ class Table2text_seq:
             batch_t = (batch_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t)  # NOTE: batch_t is now a tuple
 
         if self.data_src != 'train':
-            targets= [i[:max(target_len)-2] for i in targets]
-            sources= [i[:max(source_len)] for i in sources]
+            targets = [i[:max(target_len)-2] for i in targets]
+            sources = [i[:max(source_len)] for i in sources]
             fields = [i[:max(source_len)] for i in fields]
+            if self.dec_type == 'pt':
+                rcds = [i[:max(source_len)] for i in rcds]
+                has = [i[:max(source_len)] for i in has]
+                fields = {'fields': fields, 'rcds': rcds, 'has': has}
             return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, targets, sources, fields, list_oovs, source_len, \
                 max_source_oov, w2fs
         else:
