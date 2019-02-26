@@ -8,7 +8,8 @@ from structure_generator.EncoderRNN import EncoderRNN
 from structure_generator.DecoderRNN import DecoderRNN
 from structure_generator.seq2seq import Seq2seq
 from configurations import Config, ConfigSmall, ConfigTest, ConfigWikibio, ConfigRotowire
-from eval import Evaluate
+from metrics import Metrics
+from validator import Validator
 import random, os, pprint, logging, time
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
@@ -145,11 +146,13 @@ else:
 
 print("\n***args: ")
 pprint.pprint(vars(args), indent=2)
+
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------ Training Functions ------------------------------------------ #
 # -------------------------------------------------------------------------------------------------- #
 
 def train_batch(dataset, batch_idx, model, teacher_forcing_ratio):
+    """ Train with one batch """
     batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_t, batch_o_t, source_len, max_source_oov = \
         dataset.get_batch(batch_idx)
 
@@ -165,9 +168,9 @@ def train_batch(dataset, batch_idx, model, teacher_forcing_ratio):
     optimizer.step()
     return batch_loss.item(), len(source_len)
 
-
-def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epoch=0):
-    eval_f = Evaluate()
+def train(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epoch=0):
+    """ Train epochs, evaluate and inference on valid set"""
+    metrics = Metrics()
     best_dev_bleu = 0.0
     best_dev_rouge = 0.0
     train_loader = t_dataset.corpus
@@ -178,12 +181,14 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
     L.info("Model saving prefix is: {}".format(save_prefix))
 
     for epoch in range(load_epoch + 1, n_epochs + load_epoch + 1):
+        # ------------------------------------------------------------------------------------------ #
         # --------------------------------------- train -------------------------------------------- #
+        # ------------------------------------------------------------------------------------------ #
         L.info("Training Epoch - {}".format(epoch))
 
         model.train(True)
         torch.set_grad_enabled(True)
-        epoch_loss = 0
+        epoch_loss = 0.0
 
         batch_indices = np.arange(len_batch)  # start from the short ones
         if args.shuffle:
@@ -202,16 +207,25 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         L.info("Finished epoch %d with average loss: %.4f" % (epoch, epoch_loss))
         writer.add_scalar('loss/epoch_loss', epoch_loss, epoch)
 
-        # --------------------------------------- inference -------------------------------------------- #
+        # ------------------------------------------------------------------------------------------ #
+        # --------------------------------------- validation --------------------------------------- #
+        # ------------------------------------------------------------------------------------------ #
+        L.info("Validation Epoch - {}".format(epoch))
+        valid_f = Validator(model=model, v_dataset=v_dataset, use_cuda=args.cuda, tfr=teacher_forcing_ratio)
+        valid_loss = valid_f.valid()
+
+        # ------------------------------------------------------------------------------------------ #
+        # --------------------------------------- inference ---------------------------------------- #
+        # ------------------------------------------------------------------------------------------ #
+        L.info("Inference Epoch - {}".format(epoch))
         predictor = Predictor(model, v_dataset.vocab, args.cuda,
                               decoder_type=args.dec_type, unk_gen=config.unk_gen, dataset_type=args.type)
-        L.info("Start Evaluating ...")
-        cand, ref, eval_loss, others = predictor.preeval_batch(v_dataset)
+        cand, ref, pred_loss, others = predictor.preeval_batch(v_dataset)
         cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats = others
 
-        writer.add_scalar('valid/loss', eval_loss, epoch)
         L.info('Result:')
-        L.info('eval_loss: {}'.format(eval_loss))
+        L.info('valid_loss: {}'.format(valid_loss))
+        L.info('pred_loss: {}'.format(pred_loss))
         L.info('\nsource[1]: {}'.format(srcs[1]))
         for k, v in feats.items():
             L.info('\n{}[1]: {}'.format(k, v[1]))
@@ -244,8 +258,11 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
                 for c in range(len(cands_ids)):
                     fout.write("{}\n".format(" ".join([str(x) for x in cands_ids[c + 1]])))
 
-        # --------------------------------------- evaluation -------------------------------------------- #
-        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=epoch, cands_ids=cands_ids, tgts_ids=tgts_ids)
+        # ------------------------------------------------------------------------------------------ #
+        # ---------------------------------------- Metrics ----------------------------------------- #
+        # ------------------------------------------------------------------------------------------ #
+        final_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch,
+                                               cands_ids=cands_ids, tgts_ids=tgts_ids)
         rouge_l = final_scores['ROUGE_L']
         bleu_1 = final_scores['Bleu_1']
         bleu_2 = final_scores['Bleu_2']
@@ -255,17 +272,21 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
         recall = final_scores['recall']
         f1 = final_scores['f1']
         dis = final_scores['ndld']
-        writer.add_scalar('valid/ROUGE_L', rouge_l, epoch)
-        writer.add_scalar('valid/Bleu_1', bleu_1, epoch)
-        writer.add_scalar('valid/Bleu_2', bleu_2, epoch)
-        writer.add_scalar('valid/Bleu_3', bleu_3, epoch)
-        writer.add_scalar('valid/Bleu_4', bleu_4, epoch)
-        writer.add_scalar('valid/precision', precision, epoch)
-        writer.add_scalar('valid/recall', recall, epoch)
-        writer.add_scalar('valid/f1', f1, epoch)
-        writer.add_scalar('valid/ndld', dis, epoch)
+        writer.add_scalar('metrics/ROUGE_L', rouge_l, epoch)
+        writer.add_scalar('metrics/Bleu_1', bleu_1, epoch)
+        writer.add_scalar('metrics/Bleu_2', bleu_2, epoch)
+        writer.add_scalar('metrics/Bleu_3', bleu_3, epoch)
+        writer.add_scalar('metrics/Bleu_4', bleu_4, epoch)
+        writer.add_scalar('metrics/precision', precision, epoch)
+        writer.add_scalar('metrics/recall', recall, epoch)
+        writer.add_scalar('metrics/f1', f1, epoch)
+        writer.add_scalar('metrics/ndld', dis, epoch)
+        writer.add_scalar('loss/valid_loss', valid_loss, epoch)
+        writer.add_scalar('loss/pred_loss', pred_loss, epoch)
 
-        # ------------------------------------------ save ----------------------------------------------- #
+        # ------------------------------------------------------------------------------------------ #
+        # ------------------------------------------ save ------------------------------------------ #
+        # ------------------------------------------------------------------------------------------ #
         if bleu_4 >= best_dev_bleu and rouge_l >= best_dev_rouge:
             suffix = ".best_bleu_rouge"
             best_dev_bleu = bleu_4
@@ -288,11 +309,10 @@ def train_epoches(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, 
 # ------------------------------------------- Main ------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------- #
 if __name__ == "__main__":
-
     # -------------------------------------------------------------------------------------------------- #
     # ------------------------------------- Reading Datasets ------------------------------------------- #
     # -------------------------------------------------------------------------------------------------- #
-    eval_f = Evaluate()
+    metrics = Metrics()
     L.info("Reading training data ...")
     t_dataset = Table2text_seq('train', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size,
                                train_mode=args.mode, dec_type=args.dec_type)
@@ -356,6 +376,9 @@ if __name__ == "__main__":
     model = Seq2seq(encoder, decoder).to(device)
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
 
+    # -------------------------------------------------------------------------------------------------- #
+    # -------------------------------------- Model parameters ------------------------------------------ #
+    # -------------------------------------------------------------------------------------------------- #
     L.info("Model parameters: ")
     params_dict = {}
     for name, param in model.named_parameters():
@@ -380,7 +403,9 @@ if __name__ == "__main__":
                         params_dict["[Uniform: 1/dim*0.5][{}] {}".format(param.dtype, name)] = param.size()
 
     pprint.pprint(params_dict, indent=2)
+    # ------------------------------------------------------------------------------------------ #
     # --------------------------------------- train -------------------------------------------- #
+    # ------------------------------------------------------------------------------------------ #
     if args.mode == 0:
         try:
             L.info("number of training examples: %d" % t_dataset.len)
@@ -389,7 +414,7 @@ if __name__ == "__main__":
                                        batch_size=config.batch_size, dec_type=args.dec_type)
 
             L.info("start training...")
-            train_epoches(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1)
+            train(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1)
             writer.close()
         except KeyboardInterrupt:
             L.info('-' * 89)
@@ -398,7 +423,9 @@ if __name__ == "__main__":
             L.info("Model saved at: {}/model_before_kill.pkl".format(save_file_dir))
             L.info('Exiting from training early')
 
+    # ------------------------------------------------------------------------------------------ #
     # ----------------------------------- resume train ----------------------------------------- #
+    # ------------------------------------------------------------------------------------------ #
     elif args.mode == 1:
         model.load_state_dict(torch.load(args.save))
         load_epoch = int(args.save.split('.')[-1])
@@ -411,7 +438,7 @@ if __name__ == "__main__":
                                        batch_size=config.batch_size, dec_type=args.dec_type)
 
             L.info("start training...")
-            train_epoches(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1, load_epoch=load_epoch)
+            train(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1, load_epoch=load_epoch)
             writer.close()
         except KeyboardInterrupt:
             L.info('-' * 89)
@@ -426,11 +453,11 @@ if __name__ == "__main__":
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
-        cand, ref, eval_loss, others = predictor.preeval_batch(dataset)
+        cand, ref, pred_loss, others = predictor.preeval_batch(dataset)
         cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats = others
 
         L.info('Result:')
-        L.info('eval_loss: {}'.format(eval_loss))
+        L.info('pred_loss: {}'.format(pred_loss))
         L.info('\nref[1]: {}'.format(ref[1][0]))
         L.info('\ncand[1]: {}'.format(cand[1]))
         L.info('\nsource[1]: {}'.format(srcs[1]))
@@ -443,8 +470,12 @@ if __name__ == "__main__":
         if cands_ids is not None:
             L.info('\ncands_ids[1]: {}'.format(cands_ids[1]))
 
-        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=load_epoch, cands_ids=cands_ids, tgts_ids=tgts_ids)
+        final_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=load_epoch,
+                                               cands_ids=cands_ids, tgts_ids=tgts_ids)
+
+    # --------------------------------------------------------------------------------------- #
     # ----------------------------------- evaluation ---------------------------------------- #
+    # --------------------------------------------------------------------------------------- #
     elif args.mode == 2:
         model.load_state_dict(torch.load(args.save))
         load_epoch = int(args.save.split('.')[-1])
@@ -458,11 +489,11 @@ if __name__ == "__main__":
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
-        cand, ref, eval_loss, others = predictor.preeval_batch(dataset, fig=args.fig, save_dir=save_file_dir)
+        cand, ref, pred_loss, others = predictor.preeval_batch(dataset, fig=args.fig, save_dir=save_file_dir)
         cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats = others
 
         L.info('Result:')
-        L.info('eval_loss: {}'.format(eval_loss))
+        L.info('pred_loss: {}'.format(pred_loss))
         L.info('\nsource[1]: {}'.format(srcs[1]))
         for k, v in feats.items():
             L.info('\n{}[1]: {}'.format(k, v[1]))
@@ -523,4 +554,5 @@ if __name__ == "__main__":
             for f in range(len(feats['fields'])):
                 fout.write("{}\n".format(feats['fields'][f+1]))
 
-        final_scores = eval_f.evaluate(live=True, cand=cand, ref=ref, epoch=load_epoch, cands_ids=cands_ids, tgts_ids=tgts_ids)
+        final_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=load_epoch,
+                                               cands_ids=cands_ids, tgts_ids=tgts_ids)

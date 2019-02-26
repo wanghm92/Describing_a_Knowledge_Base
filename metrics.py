@@ -10,7 +10,7 @@ from pycocoevalcap.rouge.rouge import Rouge
 # from pycocoevalcap.meteor.meteor import Meteor
 # from pycocoevalcap.cider.cider import Cider
 
-class Evaluate(object):
+class Metrics(object):
     def __init__(self):
         self.scorers = [
             (Bleu(4), ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4"]),
@@ -43,7 +43,7 @@ class Evaluate(object):
 
         return final_scores
 
-    def evaluate(self, get_scores=True, live=False, **kwargs):
+    def compute_metrics(self, get_scores=True, live=False, **kwargs):
         pred = kwargs.pop('cands_ids', {})
         gold = kwargs.pop('tgts_ids', {})
         if live:
@@ -69,7 +69,7 @@ class Evaluate(object):
 
         print("Computing Scores ...")
         final_scores = self.score(ref, hypo)
-        final_scores = self.compute_non_rg_metrics(pred, gold, final_scores)
+        final_scores = self.non_rg_metrics(pred, gold, final_scores)
         for k, v in final_scores.items():
             print('[epoch-{}]{}:\t{}'.format(epoch, k, v))
 
@@ -81,7 +81,7 @@ class Evaluate(object):
         seen_add = seen.add
         return [x for x in seq if not (x in seen or seen_add(x))]
 
-    def compute_non_rg_metrics(self, pred, gold, final_scores):
+    def non_rg_metrics(self, pred, gold, final_scores):
         print("Computing F1 ...")
         try:
             assert len(pred) == len(gold)
@@ -134,5 +134,7 @@ if __name__ == '__main__':
     cand = {'generated_description1': 'how are you', 'generated_description2': 'Hello how are you'}
     ref = {'generated_description1': ['what are you', 'where are you'],
            'generated_description2': ['Hello how are you', 'Hello how is your day']}
-    x = Evaluate()
-    x.evaluate(live=True, cand=cand, ref=ref)
+    cands_ids = [[1, 2, 3, 4]]
+    tgts_ids = [[3, 1, 5, 0]]
+    x = Metrics()
+    x.compute_metrics(live=True, cand=cand, ref=ref, cands_ids=cands_ids, tgts_ids=tgts_ids)

@@ -45,7 +45,7 @@ class Predictor(object):
         feats = {'fields': {}, 'rcds': {}, 'has': {}} \
             if self.decoder_type == 'pt' and self.dataset_type == 3 else {'fields': []}
         i = 0
-        eval_loss = 0
+        pred_loss = 0
         figs_per_batch = 1
         total_batches = len(dataset.corpus)
 
@@ -53,13 +53,13 @@ class Predictor(object):
         for batch_idx in tqdm(range(total_batches)):
             batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_t, batch_o_t, source_len, max_source_oov, \
             w2fs, sources, targets, fields, list_oovs = dataset.get_batch(batch_idx)
-
-
-            decouts, locations, lens, losses, p_gens, selfatt, attns = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
-                                                                       w2fs=w2fs, input_lengths=source_len,
-                                                                       max_source_oov=max_source_oov, fig=True)
             batch_t = batch_t[0]
-            eval_loss += sum(losses)/len(losses)
+
+            everything = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
+                                    w2fs=w2fs, input_lengths=source_len, max_source_oov=max_source_oov, fig=True)
+            decouts, locations, lens, losses, p_gens, selfatt, attns = everything
+            pred_loss += sum(losses)/len(losses)
+
             for j in range(len(lens)):
                 i += 1
                 srcs[i] = ' '.join(['_'.join(x.split()) for x in sources[j]])
@@ -107,7 +107,7 @@ class Predictor(object):
 
         others = (cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats)
 
-        return cands, refs, eval_loss/total_batches, others
+        return cands, refs, pred_loss/total_batches, others
 
     def post_process(self, sentence, sentence_unk, pgen=None):
         try:
