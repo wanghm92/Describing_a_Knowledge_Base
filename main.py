@@ -3,6 +3,7 @@ import sys
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import *
 from predictor import Predictor
 from structure_generator.EncoderRNN import EncoderRNN
 from structure_generator.DecoderRNN import DecoderRNN
@@ -164,9 +165,15 @@ def train_batch(dataset, batch_idx, model, teacher_forcing_ratio):
     batch_loss = losses.mean()
     model.zero_grad()
     batch_loss.backward()
+    total_norm = 0.0
+    for p in list(filter(lambda p: p.grad is not None, model.parameters())):
+        param_norm = p.grad.data.norm(2)
+        total_norm += param_norm.item() ** 2
+    total_norm = total_norm ** (1. / 2)
+
     torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
     optimizer.step()
-    return batch_loss.item(), len(source_len)
+    return batch_loss.item(), len(source_len), total_norm
 
 def train(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epoch=0):
     """ Train epochs, evaluate and inference on valid set"""
@@ -175,44 +182,19 @@ def train(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
     best_dev_rouge = 0.0
     train_loader = t_dataset.corpus
     len_batch = len(train_loader)
-    L.info("{} batches to be trained".format(len_batch))
     epoch_examples_total = t_dataset.len
     save_prefix = '.'.join(args.save.split('.')[:-1]) if args.mode == 4 else args.save
     L.info("Model saving prefix is: {}".format(save_prefix))
 
     for epoch in range(load_epoch + 1, n_epochs + load_epoch + 1):
         # ------------------------------------------------------------------------------------------ #
-        # --------------------------------------- train -------------------------------------------- #
-        # ------------------------------------------------------------------------------------------ #
-        L.info("Training Epoch - {}".format(epoch))
-
-        model.train(True)
-        torch.set_grad_enabled(True)
-        epoch_loss = 0.0
-
-        batch_indices = np.arange(len_batch)  # start from the short ones
-        if args.shuffle:
-            batch_indices = np.random.permutation(batch_indices)
-
-        start_time = time.time()
-        for idx, batch_idx in enumerate(batch_indices):
-            loss, num_examples = train_batch(t_dataset, batch_idx, model, teacher_forcing_ratio)
-            epoch_loss += loss * num_examples
-            if idx%1 == 0:
-                end_time = time.time()
-                sys.stdout.write('%d batches trained. current batch loss: %f [%.3fs]\r' % (idx, loss, end_time-start_time))
-                sys.stdout.flush()
-
-        epoch_loss /= epoch_examples_total
-        L.info("Finished epoch %d with average loss: %.4f" % (epoch, epoch_loss))
-        writer.add_scalar('loss/epoch_loss', epoch_loss, epoch)
-
-        # ------------------------------------------------------------------------------------------ #
         # --------------------------------------- validation --------------------------------------- #
         # ------------------------------------------------------------------------------------------ #
         L.info("Validation Epoch - {}".format(epoch))
         valid_f = Validator(model=model, v_dataset=v_dataset, use_cuda=args.cuda, tfr=teacher_forcing_ratio)
         valid_loss = valid_f.valid()
+        if scheduler is not None:
+            scheduler.step()
 
         # ------------------------------------------------------------------------------------------ #
         # --------------------------------------- inference ---------------------------------------- #
@@ -230,13 +212,15 @@ def train(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
         for k, v in feats.items():
             L.info('\n{}[1]: {}'.format(k, v[1]))
         if config.unk_gen:
-            L.info('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
+            print('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
         if cands_with_pgens is not None:
-            L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
+            print('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
         if cands_ids is not None:
-            L.info('\ncands_ids[1]: {}'.format(cands_ids[1]))
-        L.info('\nref[1]: {}'.format(ref[1][0]))
-        L.info('\ncand[1]: {}'.format(cand[1]))
+            print('\ncands_ids[1]: {}'.format(cands_ids[1]))
+        if tgts_ids is not None:
+            print('\ntgts_ids[1]: {}'.format(tgts_ids[1]))
+        print('\nref[1]: {}'.format(ref[1][0]))
+        print('\ncand[1]: {}'.format(cand[1]))
 
         eval_file_out = "{}/evaluations/valid.epoch_{}.cand.live.txt".format(save_file_dir, epoch)
         with open(eval_file_out, 'w+') as fout:
@@ -299,11 +283,38 @@ def train(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
             best_dev_rouge = rouge_l
         else:
             suffix = ""
-        if len(suffix) > 0:
+        if len(suffix) > 0 and epoch > 1:
             L.info("model at epoch #{} saved".format(epoch))
             torch.save(model.state_dict(), "{}{}.{}".format(save_prefix, suffix, epoch))
 
-            # epoch_score = 2*rouge_l*bleu_4/(rouge_l + bleu_4)
+        # ------------------------------------------------------------------------------------------ #
+        # --------------------------------------- train -------------------------------------------- #
+        # ------------------------------------------------------------------------------------------ #
+        L.info("Training Epoch - {}".format(epoch))
+        L.info("{} batches to be trained".format(len_batch))
+
+        model.train(True)
+        torch.set_grad_enabled(True)
+        epoch_loss = 0.0
+
+        batch_indices = np.arange(len_batch)  # start from the short ones
+        if args.shuffle:
+            batch_indices = np.random.permutation(batch_indices)
+
+        start_time = time.time()
+        for idx, batch_idx in enumerate(batch_indices):
+            loss, num_examples, total_norm = train_batch(t_dataset, batch_idx, model, teacher_forcing_ratio)
+            epoch_loss += loss * num_examples
+            if idx%1 == 0:
+                end_time = time.time()
+                sys.stdout.write('%d batches trained. current batch loss: %f [%.3fs]\r' % (idx, loss, end_time-start_time))
+                sys.stdout.flush()
+            writer.add_scalar('batch/loss', loss, (epoch-1)*len_batch+idx+1)
+            writer.add_scalar('batch/grad_norm', total_norm, (epoch-1)*len_batch+idx+1)
+
+        epoch_loss /= epoch_examples_total
+        L.info("Finished epoch %d with average loss: %.4f" % (epoch, epoch_loss))
+        writer.add_scalar('loss/epoch_loss', epoch_loss, epoch)
 
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------------- Main ------------------------------------------------- #
@@ -355,7 +366,7 @@ if __name__ == "__main__":
                          embed_size=config.emsize, fdsize=fd_size,
                          hidden_size=hidden_size, posit_size=posit_size,
                          attn_src=args.attn_src,
-                         input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers,
+                         dropout_p=config.dropout, n_layers=config.nlayers,
                          rnn_cell=config.cell, directions=config.directions,
                          variable_lengths=True, field_concat_pos=args.field_concat_pos,
                          field_embedding=field_embedding, pos_embedding=pos_embedding,
@@ -370,11 +381,21 @@ if __name__ == "__main__":
                          field_self_att=args.field_self_att, field_concat_pos=args.field_concat_pos,
                          field_context=args.field_context, context_mlp=args.context_mlp,
                          mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen, max_len=args.max_len,
-                         input_dropout_p=config.dropout, dropout_p=config.dropout, n_layers=config.nlayers,
+                         dropout_p=config.dropout, n_layers=config.nlayers,
                          field_embedding=field_embedding, pos_embedding=pos_embedding, dataset_type=args.type)
 
     model = Seq2seq(encoder, decoder).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=config.lr)
+    if config.optimizer == 'adam':
+        optimizer = optim.Adam(model.parameters(), lr=config.lr)
+    elif config.optimizer == 'adagrad':
+        optimizer = optim.Adagrad(model.parameters(), lr=config.lr, lr_decay=config.decay_rate,
+                                  initial_accumulator_value=0.1)
+    else:
+        raise ValueError("{} optimizer not supported".format(args.optim))
+
+    # scheduler = ReduceLROnPlateau(optimizer, 'min', factor=args.decay) if args.decay < 1 else None
+    milestones = list(range(config.decay_start, config.epochs))
+    scheduler = MultiStepLR(optimizer, milestones, gamma=config.decay_rate) if config.decay_rate < 1 else None
 
     # -------------------------------------------------------------------------------------------------- #
     # -------------------------------------- Model parameters ------------------------------------------ #
@@ -411,7 +432,7 @@ if __name__ == "__main__":
             L.info("number of training examples: %d" % t_dataset.len)
             L.info("Reading valid data ...")
             v_dataset = Table2text_seq('valid', type=args.type, USE_CUDA=args.cuda,
-                                       batch_size=config.batch_size, dec_type=args.dec_type)
+                                       batch_size=config.valid_batch, dec_type=args.dec_type)
 
             L.info("start training...")
             train(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1)
@@ -435,7 +456,7 @@ if __name__ == "__main__":
             L.info("number of training examples: %d" % t_dataset.len)
             L.info("Reading valid data ...")
             v_dataset = Table2text_seq('valid', type=args.type, USE_CUDA=args.cuda,
-                                       batch_size=config.batch_size, dec_type=args.dec_type)
+                                       batch_size=config.valid_batch, dec_type=args.dec_type)
 
             L.info("start training...")
             train(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1, load_epoch=load_epoch)
@@ -446,7 +467,7 @@ if __name__ == "__main__":
             writer.close()
 
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda,
-                                 batch_size=config.batch_size, dec_type=args.dec_type)
+                                 batch_size=config.valid_batch, dec_type=args.dec_type)
         L.info("Read $-{}-$ data".format(args.dataset))
         predictor = Predictor(model, dataset.vocab, args.cuda,
                               decoder_type=args.dec_type, unk_gen=config.unk_gen, dataset_type=args.type)
@@ -458,17 +479,17 @@ if __name__ == "__main__":
 
         L.info('Result:')
         L.info('pred_loss: {}'.format(pred_loss))
-        L.info('\nref[1]: {}'.format(ref[1][0]))
-        L.info('\ncand[1]: {}'.format(cand[1]))
-        L.info('\nsource[1]: {}'.format(srcs[1]))
+        print('\nref[1]: {}'.format(ref[1][0]))
+        print('\ncand[1]: {}'.format(cand[1]))
+        print('\nsource[1]: {}'.format(srcs[1]))
         for k, v in feats.items():
-            L.info('\n{}[1]: {}'.format(k, v[1]))
+            print('\n{}[1]: {}'.format(k, v[1]))
         if config.unk_gen:
-            L.info('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
+            print('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
         if cands_with_pgens is not None:
-            L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
+            print('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
         if cands_ids is not None:
-            L.info('\ncands_ids[1]: {}'.format(cands_ids[1]))
+            print('\ncands_ids[1]: {}'.format(cands_ids[1]))
 
         final_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=load_epoch,
                                                cands_ids=cands_ids, tgts_ids=tgts_ids)
@@ -482,7 +503,7 @@ if __name__ == "__main__":
         L.info("model restored from epoch-{}: {}".format(load_epoch, args.save))
 
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda,
-                                 batch_size=config.batch_size, dec_type=args.dec_type)
+                                 batch_size=config.valid_batch, dec_type=args.dec_type)
         L.info("Read $-{}-$ data".format(args.dataset))
         predictor = Predictor(model, dataset.vocab, args.cuda,
                               decoder_type=args.dec_type, unk_gen=config.unk_gen, dataset_type=args.type)
@@ -494,17 +515,19 @@ if __name__ == "__main__":
 
         L.info('Result:')
         L.info('pred_loss: {}'.format(pred_loss))
-        L.info('\nsource[1]: {}'.format(srcs[1]))
+        print('\nsource[1]: {}'.format(srcs[1]))
         for k, v in feats.items():
-            L.info('\n{}[1]: {}'.format(k, v[1]))
+            print('\n{}[1]: {}'.format(k, v[1]))
         if config.unk_gen:
-            L.info('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
+            print('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
         if cands_with_pgens is not None:
-            L.info('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
+            print('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
         if cands_ids is not None:
-            L.info('\ncands_ids[1]: {}'.format(cands_ids[1]))
-        L.info('\nref[1]: {}'.format(ref[1][0]))
-        L.info('\ncand[1]: {}'.format(cand[1]))
+            print('\ncands_ids[1]: {}'.format(cands_ids[1]))
+        if tgts_ids is not None:
+            print('\ntgts_ids[1]: {}'.format(tgts_ids[1]))
+        print('\nref[1]: {}'.format(ref[1][0]))
+        print('\ncand[1]: {}'.format(cand[1]))
 
         cand_file_out = "{}/evaluations/{}.epoch_{}.cand.txt".format(save_file_dir, args.dataset, load_epoch)
         with open(cand_file_out, 'w+') as fout:
