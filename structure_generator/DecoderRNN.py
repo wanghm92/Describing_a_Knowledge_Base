@@ -17,10 +17,10 @@ class DecoderRNN(BaseRNN):
                  use_cov_loss=True, use_cov_attn=True, cov_in_pgen=False,
                  field_self_att=False, field_concat_pos=False, field_context=False, context_mlp=False,
                  mask=False, use_cuda=True, unk_gen=False,
-                 n_layers=1, input_dropout_p=0, dropout_p=0, max_len=100, lmbda=1.5,
+                 n_layers=1, dropout_p=0, max_len=100, lmbda=1.5,
                  field_embedding=None, pos_embedding=None, dataset_type=0):
         self.rnn_type = rnn_cell.lower()
-        super(DecoderRNN, self).__init__(vocab_size, hidden_size, input_dropout_p, dropout_p, n_layers)
+        super(DecoderRNN, self).__init__(vocab_size, hidden_size, dropout_p, n_layers)
 
         self.decoder_type = dec_type
         self.attn_src = attn_src
@@ -164,9 +164,11 @@ class DecoderRNN(BaseRNN):
 
         # ----------------- params for rnn cell ----------------- #
         if self.decoder_type == 'pt':
-            self.rnn = self.rnn_cell(embed_size + fdsize + posit_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
+            self.rnn = self.rnn_cell(embed_size + fdsize + posit_size, hidden_size, n_layers,
+                                     batch_first=True, dropout=self.dropout_p)
         else:
-            self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers, batch_first=True, dropout=dropout_p)
+            self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers,
+                                     batch_first=True, dropout=self.dropout_p)
 
     def _pos_self_attn(self, enc_pos, enc_hidden, enc_input, enc_field, enc_mask):
         """ compute the self-attentive encoder output and field encodings"""
@@ -574,7 +576,7 @@ class DecoderRNN(BaseRNN):
                 embedded = torch.cat((embedded, embed_field_pos), dim=2)
                 # embedded = torch.cat((embedded, embed_field), dim=2)
 
-            decoder_inputs = self.input_dropout(embedded)
+            decoder_inputs = self.dropout(embedded)
 
             hidden, _ = self.rnn(decoder_inputs, decoder_hidden_init)
 
@@ -612,18 +614,23 @@ class DecoderRNN(BaseRNN):
                 else:
                     if self.decoder_type == 'pt':
                         target_id = lab_t[:, step + 1].unsqueeze(1)  # 0th is <SOS>, [batch] of ids of next word
+                        target_mask_0 = target_id.eq(0).squeeze(1).detach()
+
                     logits = logits_or_probs
                     # print('logits: {}'.format(logits.size()))
-                    # print('target_id: {}'.format(target_id))
-
+                    # print('target_id: {}'.format(target_id.size()))
                     _lm_loss = self.criterion(logits, target_id.squeeze(1))
+
+                    _lm_loss.masked_fill_(target_mask_0.data.byte(), 0)
                     _lm_loss = _lm_loss.unsqueeze(1)
 
                 lm_loss.append(_lm_loss)
 
             # NOTE: loss is normalized by length, use sum of loss leads to faster conversion
-            total_masked_loss = torch.cat(lm_loss, 1).sum(1).div(dec_lens)
-            # total_masked_loss = torch.cat(lm_loss, 1).sum(1)
+            # total_masked_loss = torch.cat(lm_loss, 1).sum(1).div(dec_lens)
+            total_masked_loss = torch.cat(lm_loss, 1).sum(1).mean()  # sum over tgt length
+            # print('total_masked_loss: {}'.format(total_masked_loss.size()))
+
             if self.use_cov_loss:
                 total_masked_loss = total_masked_loss + self.lmbda * torch.stack(cov_loss, 1).sum(1).div(dec_lens)
 

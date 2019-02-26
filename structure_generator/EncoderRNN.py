@@ -7,12 +7,12 @@ from .baseRNN import BaseRNN
 class EncoderRNN(BaseRNN):
     def __init__(self, vocab_size=0, embedding=None,
                  hidden_size=0, posit_size=0, embed_size=0, fdsize=0, dec_size=0,
-                 attn_src='emb', input_dropout_p=0, dropout_p=0, n_layers=1, rnn_cell='gru', directions=2, 
+                 attn_src='emb', dropout_p=0, n_layers=1, rnn_cell='gru', directions=2,
                  variable_lengths=True, field_concat_pos=False,
                  field_embedding=None, pos_embedding=None, dataset_type=0, enc_type='rnn'):
 
         self.rnn_type = rnn_cell.lower()
-        super(EncoderRNN, self).__init__(vocab_size, hidden_size, input_dropout_p, dropout_p, n_layers)
+        super(EncoderRNN, self).__init__(vocab_size, hidden_size, dropout_p, n_layers)
 
         self.attn_src = attn_src
         self.embed_size = embed_size
@@ -40,7 +40,7 @@ class EncoderRNN(BaseRNN):
                                      n_layers,
                                      batch_first=True,
                                      bidirectional=(directions == 2),
-                                     dropout=dropout_p)
+                                     dropout=self.dropout_p)
         else:
             raise ValueError("{} enc_type is not supported".format(enc_type))
 
@@ -65,7 +65,7 @@ class EncoderRNN(BaseRNN):
         embed_pos = torch.cat((embed_pf, embed_pb), dim=2)
         embed_field_pos = torch.cat((embed_field, embed_pos), dim=2)
         embedded = torch.cat((embed_input, embed_field_pos), dim=2)
-        embedded = self.input_dropout(embedded)
+        embedded = self.dropout(embedded)
 
         if self.enc_type == 'rnn':
             if self.variable_lengths:
@@ -78,7 +78,6 @@ class EncoderRNN(BaseRNN):
                 enc_outputs, _ = nn.utils.rnn.pad_packed_sequence(enc_hidden, batch_first=True)
                 enc_outputs = enc_outputs.contiguous()
         elif self.enc_type == 'fc':
-
             batch, sourceL, dim = embedded.size()
             mask = enc_mask.unsqueeze(1)
             mask = mask.repeat(1, sourceL, 1)
