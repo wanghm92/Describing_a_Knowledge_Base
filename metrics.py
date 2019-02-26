@@ -91,12 +91,13 @@ class Metrics(object):
         print("{} pairs to be evaluated".format(len(pred)))
 
         true_positives, predicted, total_gold = 0, 0, 0
+        ndld = 0.0
 
         for i in range(1, len(pred)+1):
             ascii_start = 1
             p = self.remove_dups(pred[i])
             g = self.remove_dups(gold[i])
-            s1 = ''.join((chr(ascii_start + i) for i in range(len(p))))
+            s1 = ''.join([chr(ascii_start + i) for i in range(len(p))])
             pred_dict = {n: s for n,s in zip(p, s1)}
             s2 = ''
             next_char = ascii_start + len(s1)
@@ -114,18 +115,17 @@ class Metrics(object):
             true_positives += tp
             predicted += len(p)
             total_gold += len(g)
+            ndld += 100.0*(1 - normalized_damerau_levenshtein_distance(s1, s2))
 
-        # TODO: fix always 0 bug
-
-        dis = 100.0 - normalized_damerau_levenshtein_distance(s1, s2)*100.0
         precision = 100.0*float(true_positives) / predicted
         recall = 100.0*float(true_positives) / total_gold
         f1 = 2*precision*recall/(precision+recall)
+        ndld /= len(pred)
 
         final_scores['precision'] = precision
         final_scores['recall'] = recall
         final_scores['f1'] = f1
-        final_scores['ndld'] = dis
+        final_scores['ndld'] = ndld
 
         return final_scores
 
@@ -134,7 +134,8 @@ if __name__ == '__main__':
     cand = {'generated_description1': 'how are you', 'generated_description2': 'Hello how are you'}
     ref = {'generated_description1': ['what are you', 'where are you'],
            'generated_description2': ['Hello how are you', 'Hello how is your day']}
-    cands_ids = [[1, 2, 3, 4]]
-    tgts_ids = [[3, 1, 5, 0]]
+    print(normalized_damerau_levenshtein_distance('1234', '3150'))
+    cands_ids = {1: [1, 2, 3, 4]}
+    tgts_ids = {1: [3, 1, 5, 0]}
     x = Metrics()
-    x.compute_metrics(live=True, cand=cand, ref=ref, cands_ids=cands_ids, tgts_ids=tgts_ids)
+    x.compute_metrics(get_scores=False, live=True, cand=cand, ref=ref, cands_ids=cands_ids, tgts_ids=tgts_ids)
