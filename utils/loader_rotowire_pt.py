@@ -248,7 +248,7 @@ class Table2text_seq:
         self.total_cnt_tgt = 0
 
         # ----------------------- file names ------------------------- #
-        if data_src == 'train':
+        if data_src == 'train' or data_src == 'train4eval':
             path = "{}train_P.pkl".format(prefix)
         elif data_src == 'valid':
             path = "{}valid_P.pkl".format(prefix)

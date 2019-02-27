@@ -28,7 +28,7 @@ L.info("Running %s" % ' '.join(sys.argv))
 # -------------------------------------------------------------------------------------------------- #
 
 parser = argparse.ArgumentParser(description='pointer generator model')
-parser.add_argument('--seed', type=int, default=1111,
+parser.add_argument('--seed', type=int, default=1234,
                     help='random seed')
 parser.add_argument('--cuda', action='store_false',
                     help='use CUDA')
@@ -175,9 +175,9 @@ def train_batch(dataset, batch_idx, model, teacher_forcing_ratio):
     optimizer.step()
     return batch_loss.item(), len(source_len), total_norm
 
-def train(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epoch=0):
+def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epoch=0):
     """ Train epochs, evaluate and inference on valid set"""
-    metrics = Metrics()
+    t_dataset, t4e_dataset = trainsets
     best_dev_bleu = 0.0
     best_dev_rouge = 0.0
     train_loader = t_dataset.corpus
@@ -193,8 +193,7 @@ def train(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
         L.info("Validation Epoch - {}".format(epoch))
         valid_f = Validator(model=model, v_dataset=v_dataset, use_cuda=args.cuda, tfr=teacher_forcing_ratio)
         valid_loss = valid_f.valid()
-        if scheduler is not None:
-            scheduler.step()
+        writer.add_scalar('loss/valid_loss', valid_loss, epoch)
 
         # ------------------------------------------------------------------------------------------ #
         # --------------------------------------- inference ---------------------------------------- #
@@ -204,6 +203,7 @@ def train(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
                               decoder_type=args.dec_type, unk_gen=config.unk_gen, dataset_type=args.type)
         cand, ref, pred_loss, others = predictor.preeval_batch(v_dataset)
         cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats = others
+        writer.add_scalar('loss/pred_loss', pred_loss, epoch)
 
         L.info('Result:')
         L.info('valid_loss: {}'.format(valid_loss))
@@ -245,32 +245,22 @@ def train(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
         # ------------------------------------------------------------------------------------------ #
         # ---------------------------------------- Metrics ----------------------------------------- #
         # ------------------------------------------------------------------------------------------ #
-        final_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch,
+        valid_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch,
                                                cands_ids=cands_ids, tgts_ids=tgts_ids)
-        rouge_l = final_scores['ROUGE_L']
-        bleu_1 = final_scores['Bleu_1']
-        bleu_2 = final_scores['Bleu_2']
-        bleu_3 = final_scores['Bleu_3']
-        bleu_4 = final_scores['Bleu_4']
-        precision = final_scores['precision']
-        recall = final_scores['recall']
-        f1 = final_scores['f1']
-        dis = final_scores['ndld']
-        writer.add_scalar('metrics/ROUGE_L', rouge_l, epoch)
-        writer.add_scalar('metrics/Bleu_1', bleu_1, epoch)
-        writer.add_scalar('metrics/Bleu_2', bleu_2, epoch)
-        writer.add_scalar('metrics/Bleu_3', bleu_3, epoch)
-        writer.add_scalar('metrics/Bleu_4', bleu_4, epoch)
-        writer.add_scalar('metrics/precision', precision, epoch)
-        writer.add_scalar('metrics/recall', recall, epoch)
-        writer.add_scalar('metrics/f1', f1, epoch)
-        writer.add_scalar('metrics/ndld', dis, epoch)
-        writer.add_scalar('loss/valid_loss', valid_loss, epoch)
-        writer.add_scalar('loss/pred_loss', pred_loss, epoch)
+        metrics.run_logger(writer=writer, epoch=epoch)
+
+        cand, ref, pred_loss, others = predictor.preeval_batch(t4e_dataset)
+
+        train_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch,
+                                               cands_ids=cands_ids, tgts_ids=tgts_ids)
+
+        metrics.run_logger(writer=writer, epoch=epoch, cat='train_metrics')
 
         # ------------------------------------------------------------------------------------------ #
         # ------------------------------------------ save ------------------------------------------ #
         # ------------------------------------------------------------------------------------------ #
+        rouge_l = valid_scores['ROUGE_L']
+        bleu_4 = valid_scores['Bleu_4']
         if bleu_4 >= best_dev_bleu and rouge_l >= best_dev_rouge:
             suffix = ".best_bleu_rouge"
             best_dev_bleu = bleu_4
@@ -297,7 +287,8 @@ def train(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
         torch.set_grad_enabled(True)
         epoch_loss = 0.0
 
-        batch_indices = np.arange(len_batch)  # start from the short ones
+        batch_indices = list(range(len_batch))
+        batch_indices.reverse()  # start from the short ones
         if args.shuffle:
             batch_indices = np.random.permutation(batch_indices)
 
@@ -315,19 +306,25 @@ def train(t_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
         epoch_loss /= epoch_examples_total
         L.info("Finished epoch %d with average loss: %.4f" % (epoch, epoch_loss))
         writer.add_scalar('loss/epoch_loss', epoch_loss, epoch)
+        if scheduler is not None:
+            if isinstance(scheduler, ReduceLROnPlateau):
+                scheduler.step(valid_loss)
+            else:
+                scheduler.step()
 
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------------- Main ------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------- #
 if __name__ == "__main__":
+    metrics = Metrics()
     # -------------------------------------------------------------------------------------------------- #
     # ------------------------------------- Reading Datasets ------------------------------------------- #
     # -------------------------------------------------------------------------------------------------- #
-    metrics = Metrics()
     L.info("Reading training data ...")
     t_dataset = Table2text_seq('train', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size,
                                train_mode=args.mode, dec_type=args.dec_type)
-
+    t4e_dataset = Table2text_seq('train4eval', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size,
+                               train_mode=args.mode, dec_type=args.dec_type)
     # -------------------------------------------------------------------------------------------------- #
     # -------------------------------------- Building Model -------------------------------------------- #
     # -------------------------------------------------------------------------------------------------- #
@@ -380,7 +377,8 @@ if __name__ == "__main__":
                          use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
                          field_self_att=args.field_self_att, field_concat_pos=args.field_concat_pos,
                          field_context=args.field_context, context_mlp=args.context_mlp,
-                         mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen, max_len=args.max_len,
+                         mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen,
+                         max_len=config.max_len, min_len=config.min_len,
                          dropout_p=config.dropout, n_layers=config.nlayers,
                          field_embedding=field_embedding, pos_embedding=pos_embedding, dataset_type=args.type)
 
@@ -394,8 +392,10 @@ if __name__ == "__main__":
         raise ValueError("{} optimizer not supported".format(args.optim))
 
     # scheduler = ReduceLROnPlateau(optimizer, 'min', factor=args.decay) if args.decay < 1 else None
-    milestones = list(range(config.decay_start, config.epochs))
-    scheduler = MultiStepLR(optimizer, milestones, gamma=config.decay_rate) if config.decay_rate < 1 else None
+    # milestones = list(range(config.decay_start, config.epochs))
+    # scheduler = MultiStepLR(optimizer, milestones, gamma=config.decay_rate) if config.decay_rate < 1 else None
+    # scheduler = ReduceLROnPlateau(optimizer, 'min', patience=1, verbose=True)
+    scheduler = ExponentialLR(optimizer, gamma=config.decay_rate) if config.decay_rate < 1 else None
 
     # -------------------------------------------------------------------------------------------------- #
     # -------------------------------------- Model parameters ------------------------------------------ #
@@ -435,7 +435,8 @@ if __name__ == "__main__":
                                        batch_size=config.valid_batch, dec_type=args.dec_type)
 
             L.info("start training...")
-            train(t_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1)
+            trainsets = (t_dataset, t4e_dataset)
+            train(trainsets, v_dataset, model, config.epochs, teacher_forcing_ratio=1)
             writer.close()
         except KeyboardInterrupt:
             L.info('-' * 89)

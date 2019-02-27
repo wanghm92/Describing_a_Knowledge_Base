@@ -19,6 +19,7 @@ class Metrics(object):
             # (Cider(), "CIDEr")
             ]
         self.fields = ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4", "ROUGE_L"]
+        self.final_scores = {}
 
     def convert(self, data):
         if isinstance(data, basestring):
@@ -31,17 +32,16 @@ class Metrics(object):
             return data
 
     def score(self, ref, hypo):
-        final_scores = {}
+        # reset final score dictionary
+        self.final_scores = {}
         for scorer, method in self.scorers:
             print("Metric: {}".format(method))
             score, scores = scorer.compute_score(ref, hypo)
             if type(score) == list:
                 for m, s in zip(method, score):
-                    final_scores[m] = s
+                    self.final_scores[m] = s
             else:
-                final_scores[method] = score
-
-        return final_scores
+                self.final_scores[method] = score
 
     def compute_metrics(self, get_scores=True, live=False, **kwargs):
         pred = kwargs.pop('cands_ids', {})
@@ -68,20 +68,20 @@ class Metrics(object):
             i += 1
 
         print("Computing Scores ...")
-        final_scores = self.score(ref, hypo)
-        final_scores = self.non_rg_metrics(pred, gold, final_scores)
-        for k, v in final_scores.items():
+        self.score(ref, hypo)
+        self.non_rg_metrics(pred, gold)
+        for k, v in self.final_scores.items():
             print('[epoch-{}]{}:\t{}'.format(epoch, k, v))
 
         if get_scores:
-            return final_scores
+            return self.final_scores
 
     def remove_dups(self, seq):
         seen = set()
         seen_add = seen.add
         return [x for x in seq if not (x in seen or seen_add(x))]
 
-    def non_rg_metrics(self, pred, gold, final_scores):
+    def non_rg_metrics(self, pred, gold):
         print("Computing F1 ...")
         try:
             assert len(pred) == len(gold)
@@ -122,13 +122,31 @@ class Metrics(object):
         f1 = 2*precision*recall/(precision+recall)
         ndld /= len(pred)
 
-        final_scores['precision'] = precision
-        final_scores['recall'] = recall
-        final_scores['f1'] = f1
-        final_scores['ndld'] = ndld
+        self.final_scores['precision'] = precision
+        self.final_scores['recall'] = recall
+        self.final_scores['f1'] = f1
+        self.final_scores['ndld'] = ndld
 
-        return final_scores
 
+    def run_logger(self, writer, epoch, cat='valid_metrics'):
+        rouge_l = self.final_scores['ROUGE_L']
+        bleu_1 = self.final_scores['Bleu_1']
+        bleu_2 = self.final_scores['Bleu_2']
+        bleu_3 = self.final_scores['Bleu_3']
+        bleu_4 = self.final_scores['Bleu_4']
+        precision = self.final_scores['precision']
+        recall = self.final_scores['recall']
+        f1 =self. final_scores['f1']
+        dis = self.final_scores['ndld']
+        writer.add_scalar('{}/ROUGE_L'.format(cat), rouge_l, epoch)
+        writer.add_scalar('{}/Bleu_1'.format(cat), bleu_1, epoch)
+        writer.add_scalar('{}/Bleu_2'.format(cat), bleu_2, epoch)
+        writer.add_scalar('{}/Bleu_3'.format(cat), bleu_3, epoch)
+        writer.add_scalar('{}/Bleu_4'.format(cat), bleu_4, epoch)
+        writer.add_scalar('{}/precision'.format(cat), precision, epoch)
+        writer.add_scalar('{}/recall'.format(cat), recall, epoch)
+        writer.add_scalar('{}/f1'.format(cat), f1, epoch)
+        writer.add_scalar('{}/ndld'.format(cat), dis, epoch)
 
 if __name__ == '__main__':
     cand = {'generated_description1': 'how are you', 'generated_description2': 'Hello how are you'}

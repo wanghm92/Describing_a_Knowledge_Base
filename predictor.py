@@ -75,7 +75,7 @@ class Predictor(object):
                     out_seq_ids = locations[j].tolist()
                     out_seq_ids = out_seq_ids[:lens[j]-1]
                     cands_ids[i] = out_seq_ids
-                    tgt_seq_ids = [x for x in batch_t[j].tolist() if x != 2 and x != 3]
+                    tgt_seq_ids = [x for x in batch_t[j].tolist() if x > 3]
                     tgts_ids[i] = tgt_seq_ids
 
                 for k in range(lens[j]):
