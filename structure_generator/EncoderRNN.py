@@ -48,6 +48,7 @@ class EncoderRNN(BaseRNN):
 
         # get mask for location of PAD
         enc_mask = batch_s.eq(0).detach()
+        enc_non_stop_mask = batch_s.eq(2).detach()
 
         embed_input = self.embedding(batch_s)
         if self.field_embedding is not None:
@@ -65,7 +66,6 @@ class EncoderRNN(BaseRNN):
         embed_pos = torch.cat((embed_pf, embed_pb), dim=2)
         embed_field_pos = torch.cat((embed_field, embed_pos), dim=2)
         embedded = torch.cat((embed_input, embed_field_pos), dim=2)
-        embedded = self.dropout(embedded)
 
         if self.enc_type == 'rnn':
             if self.variable_lengths:
@@ -85,6 +85,7 @@ class EncoderRNN(BaseRNN):
             mask[:, mask_self_index, mask_self_index] = 1
 
             r = self.fc(embedded)
+            r = self.dropout(r)
             rt = r.transpose(1, 2)
 
             align = torch.bmm(r, rt)
@@ -113,6 +114,6 @@ class EncoderRNN(BaseRNN):
             # print('enc_outputs: {}'.format(enc_outputs.size()))
 
         if self.field_concat_pos:
-            return enc_outputs, embed_input, embed_field_pos, embed_pos, enc_state, enc_mask
+            return enc_outputs, embed_input, embed_field_pos, embed_pos, enc_state, (enc_mask, enc_non_stop_mask)
         else:
-            return enc_outputs, embed_input, embed_field, embed_pos, enc_state, enc_mask
+            return enc_outputs, embed_input, embed_field, embed_pos, enc_state, (enc_mask, enc_non_stop_mask)

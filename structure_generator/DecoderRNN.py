@@ -17,7 +17,7 @@ class DecoderRNN(BaseRNN):
                  use_cov_loss=True, use_cov_attn=True, cov_in_pgen=False,
                  field_self_att=False, field_concat_pos=False, field_context=False, context_mlp=False,
                  mask=False, use_cuda=True, unk_gen=False,
-                 n_layers=1, dropout_p=0, max_len=100, lmbda=1.5,
+                 n_layers=1, dropout_p=0, max_len=100, min_len=20, lmbda=1.5,
                  field_embedding=None, pos_embedding=None, dataset_type=0):
         self.rnn_type = rnn_cell.lower()
         super(DecoderRNN, self).__init__(vocab_size, hidden_size, dropout_p, n_layers)
@@ -37,6 +37,7 @@ class DecoderRNN(BaseRNN):
         self.context_mlp = context_mlp
         self.output_size = vocab_size
         self.max_length = max_len
+        self.min_length = min_len
         self.eos_id = eos_id
         self.sos_id = sos_id
         self.unk_id = unk_id
@@ -112,20 +113,25 @@ class DecoderRNN(BaseRNN):
                 self.Wd_hidden = nn.Linear(hidden_size, hidden_size)
 
         # ----------------- params for encoder memory keys ----------------- #
-        self.Wf = nn.Linear(field_input_size, hidden_size)
 
         enc_hidden_size = hidden_size * self.directions
-        if self.attn_level == 3:
-            self.We = nn.Linear(embed_size, hidden_size)  # e_t: word embeddings to keys
-            self.Wr = nn.Linear(enc_hidden_size, hidden_size)  # e_t: encoder hidden states to keys
-        elif self.attn_level == 2:
-            if self.attn_src == 'emb':
-                self.We = nn.Linear(embed_size, hidden_size)
-            elif self.attn_src == 'rnn':
+        if self.dataset_type != 3:
+            self.Wf = nn.Linear(field_input_size, hidden_size)
+            if self.attn_level == 3:
+                self.We = nn.Linear(embed_size, hidden_size)  # e_t: word embeddings to keys
+                self.Wr = nn.Linear(enc_hidden_size, hidden_size)  # e_t: encoder hidden states to keys
+            elif self.attn_level == 2:
+                if self.attn_src == 'emb':
+                    self.We = nn.Linear(embed_size, hidden_size)
+                elif self.attn_src == 'rnn':
+                    self.Wr = nn.Linear(enc_hidden_size, hidden_size)
+            else:
+                # NOTE: assume to use encoder rnn hidden states when attn_level == 1
                 self.Wr = nn.Linear(enc_hidden_size, hidden_size)
         else:
-            # NOTE: assume to use encoder rnn hidden states when attn_level == 1
-            self.Wr = nn.Linear(enc_hidden_size, hidden_size)
+            self.We = None
+            self.Wf = None
+            self.Wr = None
 
         if self.use_cov_attn:
             self.Wc = nn.Linear(1, hidden_size)  # e_t: coverage vector
@@ -164,7 +170,9 @@ class DecoderRNN(BaseRNN):
 
         # ----------------- params for rnn cell ----------------- #
         if self.decoder_type == 'pt':
-            self.rnn = self.rnn_cell(embed_size + fdsize + posit_size, hidden_size, n_layers,
+            self.input_size = embed_size + fdsize + posit_size
+            self.input_mlp = nn.Sequential(nn.Linear(self.input_size, embed_size), nn.ReLU())
+            self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers,
                                      batch_first=True, dropout=self.dropout_p)
         else:
             self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers,
@@ -522,11 +530,13 @@ class DecoderRNN(BaseRNN):
                 return out_vec, attn_weights, (None, None)
 
     def forward(self, max_source_oov=0, targets=None, targets_id=None, input_ids=None,
-                enc_hidden=None, enc_input=None, enc_state=None, enc_mask=None, enc_field=None, enc_pos=None,
+                enc_hidden=None, enc_input=None, enc_state=None, enc_masks=None, enc_field=None, enc_pos=None,
                 teacher_forcing_ratio=None, w2fs=None, fig=False):
         """
             targets=batch_t, targets_id=batch_o_t, input_ids=batch_o_s
         """
+
+        enc_seq_mask, enc_non_stop_mask = enc_masks
 
         if self.decoder_type == 'pt':
             if targets is not None:
@@ -546,13 +556,16 @@ class DecoderRNN(BaseRNN):
             coverage = None
             # coverage_norm = None
 
-        enc_hidden_keys, enc_input_keys, enc_field_keys = \
-            self._get_enc_keys(enc_hidden, enc_input, enc_field, batch_size, max_enc_len)
+        if self.dataset_type != 3:
+            enc_hidden_keys, enc_input_keys, enc_field_keys = \
+                self._get_enc_keys(enc_hidden, enc_input, enc_field, batch_size, max_enc_len)
+        else:
+            enc_hidden_keys, enc_input_keys, enc_field_keys = (enc_hidden, enc_input, enc_field)
 
         # get position self-attention scores
         if self.field_self_att:
             f_matrix, enc_hidden_vals, enc_input_vals, enc_field_vals\
-                = self._pos_self_attn(enc_pos, enc_hidden, enc_input, enc_field, enc_mask)
+                = self._pos_self_attn(enc_pos, enc_hidden, enc_input, enc_field, enc_seq_mask)
         else:
             f_matrix = None
             enc_hidden_vals = enc_hidden
@@ -576,7 +589,7 @@ class DecoderRNN(BaseRNN):
                 embedded = torch.cat((embedded, embed_field_pos), dim=2)
                 # embedded = torch.cat((embedded, embed_field), dim=2)
 
-            decoder_inputs = self.dropout(embedded)
+            decoder_inputs = self.dropout(self.input_mlp(embedded))
 
             hidden, _ = self.rnn(decoder_inputs, decoder_hidden_init)
 
@@ -589,7 +602,7 @@ class DecoderRNN(BaseRNN):
 
                 logits_or_probs, attn_weights, _ = self._decode_step(batch_size, input_ids, coverage, max_source_oov,
                                                                      dec_hidden, decoder_input,
-                                                                     enc_mask, max_enc_len,
+                                                                     enc_seq_mask, max_enc_len,
                                                                      enc_hidden_keys, enc_input_keys, enc_field_keys,
                                                                      enc_hidden_vals, enc_input_vals, enc_field_vals)
 
@@ -637,17 +650,18 @@ class DecoderRNN(BaseRNN):
             return total_masked_loss
         else:
             return self.evaluate(targets, batch_size, max_length, max_source_oov,
-                                 f_matrix, decoder_hidden_init, enc_mask, input_ids, coverage,
+                                 f_matrix, decoder_hidden_init, enc_masks, input_ids, coverage,
                                  enc_hidden_keys, enc_input_keys, enc_field_keys,
                                  enc_hidden_vals, enc_input_vals, enc_field_vals,
                                  max_enc_len, w2fs, fig)
 
     def evaluate(self, targets, batch_size, max_length, max_source_oov,
-                 f_matrix, decoder_hidden_init, enc_mask, input_ids, coverage,
+                 f_matrix, decoder_hidden_init, enc_masks, input_ids, coverage,
                  enc_hidden_keys, enc_input_keys, enc_field_keys,
                  enc_hidden_vals, enc_input_vals, enc_field_vals,
                  max_enc_len, w2fs, fig):
 
+        enc_seq_mask, enc_non_stop_mask = enc_masks
         lengths = np.array([max_length] * batch_size)
         finished = np.array([False] * batch_size)
         no_dup_mask = np.ones((batch_size, max_enc_len), dtype=np.float32)
@@ -673,17 +687,16 @@ class DecoderRNN(BaseRNN):
         else:
             embedded = self.embedding(targets)
 
-        decoder_input = embedded
+        decoder_input = self.dropout(self.input_mlp(embedded))
         # weighted_coverage = coverage.clone()
         # step through decoder hidden states
         for step in range(max_length):
-            # TODO: set min_length
             dec_hidden, _c = self.rnn(decoder_input, decoder_hidden_init)
             logits_or_prob, attn_weights, (p_gen, src_prob) = self._decode_step(batch_size, input_ids, coverage,
                                                                                 max_source_oov,
                                                                                 dec_hidden.squeeze(1),
                                                                                 decoder_input.squeeze(1),
-                                                                                enc_mask, max_enc_len,
+                                                                                enc_seq_mask, max_enc_len,
                                                                                 enc_hidden_keys, enc_input_keys,
                                                                                 enc_field_keys,
                                                                                 enc_hidden_vals, enc_input_vals,
@@ -700,6 +713,8 @@ class DecoderRNN(BaseRNN):
                 vocab_probs[:, self.unk_id] = 0  # NOTE: not allow decoder to output UNK
 
             no_dup_mask_tensor = torch.from_numpy(no_dup_mask).cuda()
+            if step < self.min_length:
+                vocab_probs.masked_fill_(enc_non_stop_mask.data.byte(), 0.0)
             vocab_probs = torch.mul(vocab_probs, no_dup_mask_tensor)
 
             probs, symbols_or_positions = vocab_probs.topk(1)  # greedy decoding: get word indices and probs
@@ -748,6 +763,8 @@ class DecoderRNN(BaseRNN):
                 # print('dec_word_input: {}'.format(dec_word_input.size()))
                 # print('dec_field_input: {}'.format(dec_field_input.size()))
                 decoder_input = torch.cat((dec_word_input, dec_field_input), dim=2)
+                decoder_input = self.dropout(self.input_mlp(decoder_input))
+
             else:
                 locations = None
                 decoder_input = self.embedding(symbols)
