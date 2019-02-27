@@ -7,7 +7,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from tqdm import tqdm
 
 class Predictor(object):
-    def __init__(self, model, vocab, USE_CUDA, decoder_type='pg', unk_gen='False'):
+    def __init__(self, model, vocab, USE_CUDA, decoder_type='pg', unk_gen='False', dataset_type=0):
         device = torch.device("cuda" if USE_CUDA else "cpu")
         self.model = model.to(device)
         self.model.eval()
@@ -15,6 +15,7 @@ class Predictor(object):
         self.USE_CUDA = USE_CUDA
         self.decoder_type = decoder_type
         self.unk_gen = unk_gen
+        self.dataset_type = dataset_type
 
     def predict(self, batch_s, batch_o_s, batch_f, batch_pf, batch_pb, max_source_oov, source_len, list_oovs, w2fs):
         torch.set_grad_enabled(False)
@@ -36,29 +37,47 @@ class Predictor(object):
         torch.set_grad_enabled(False)
         refs = {}
         cands = {}
+        cands_ids = {} if self.decoder_type == 'pt' and self.dataset_type == 3 else None
+        tgts_ids = {} if self.decoder_type == 'pt' and self.dataset_type == 3 else None
         cands_with_pgens = {} if self.decoder_type == 'pg' else None
         cands_with_unks = {} if self.unk_gen else None
         srcs = {}
-        fds = {}
+        feats = {'fields': {}, 'rcds': {}, 'has': {}} \
+            if self.decoder_type == 'pt' and self.dataset_type == 3 else {'fields': []}
         i = 0
-        eval_loss = 0
+        pred_loss = 0
         figs_per_batch = 1
         total_batches = len(dataset.corpus)
+
         print("{} batches to be evaluated".format(total_batches))
         for batch_idx in tqdm(range(total_batches)):
-            batch_s, batch_o_s, batch_f, batch_pf, batch_pb, sources, targets, fields, list_oovs, source_len, \
-                max_source_oov, w2fs = dataset.get_batch(batch_idx)
-            decouts, lens, losses, p_gens, selfatt, attns = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
-                                                                       w2fs=w2fs, input_lengths=source_len,
-                                                                       max_source_oov=max_source_oov, fig=True)
-            eval_loss += sum(losses)/len(losses)
+            batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_t, batch_o_t, source_len, max_source_oov, \
+            w2fs, sources, targets, fields, list_oovs = dataset.get_batch(batch_idx)
+            batch_t = batch_t[0]
+
+            everything = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
+                                    w2fs=w2fs, input_lengths=source_len, max_source_oov=max_source_oov, fig=True)
+            decouts, locations, lens, losses, p_gens, selfatt, attns = everything
+            pred_loss += sum(losses)/len(losses)
+
             for j in range(len(lens)):
                 i += 1
                 srcs[i] = ' '.join(['_'.join(x.split()) for x in sources[j]])
-                fds[i] = ' '.join(fields[j])
+
+                # NOTE: fields is a dictionary of all feats for ptr-net
+                for k, v in fields.items():
+                    feats[k][i] = ' '.join(v[j])
+
                 refs[i] = [' '.join(targets[j])]
                 out_seq_clean = []
                 out_seq_unk = []
+                if locations is not None:
+                    out_seq_ids = locations[j].tolist()
+                    out_seq_ids = out_seq_ids[:lens[j]-1]
+                    cands_ids[i] = out_seq_ids
+                    tgt_seq_ids = [x for x in batch_t[j].tolist() if x > 3]
+                    tgts_ids[i] = tgt_seq_ids
+
                 for k in range(lens[j]):
                     # get tokens and replace OOVs
                     symbol = decouts[j][k].item()
@@ -86,7 +105,9 @@ class Predictor(object):
                 if self.unk_gen:
                     cands_with_unks[i] = ' '.join(out_unk)
 
-        return cands, refs, eval_loss/total_batches, (cands_with_unks, cands_with_pgens, srcs, fds)
+        others = (cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats)
+
+        return cands, refs, pred_loss/total_batches, others
 
     def post_process(self, sentence, sentence_unk, pgen=None):
         try:

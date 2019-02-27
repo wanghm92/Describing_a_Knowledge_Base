@@ -4,6 +4,7 @@ import pickle, sys, json, io, copy
 from os.path import expanduser
 HOME = expanduser("~")
 from tqdm import tqdm
+import numpy as np
 
 class Vocabulary:
     """Vocabulary class for mapping between words and ids"""
@@ -121,7 +122,7 @@ class Vocabulary:
                 else:
                     _o_source.append(self.word2idx['<UNK>'])
                 _source.append(self.word2idx['<UNK>'])
-                # use field type embedding for OOV field values
+                # use field type embedding for OOV values
                 # _source.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
         if self.dec_type == 'pt':
             _o_source.append(self.word2idx['<EOS>'])
@@ -266,7 +267,7 @@ class Table2text_seq:
                 field_t.append(tag)
                 p_for_t.append(pos)
                 p_bck_t.append(rpos)
-                lab_t.append(lab)
+                lab_t.append(lab)  # int
 
             # print("value_s: {}".format(value_s))
             # print("field_s: {}".format(field_s))
@@ -278,7 +279,6 @@ class Table2text_seq:
             # print("p_for_t: {}".format(p_bck_t))
             # print("lab_t: {}".format(lab_t))
 
-            # TODO: this is not correct
             curr_p_max = max(p_for_s) + 1
 
             if self.max_p < curr_p_max:
@@ -294,7 +294,9 @@ class Table2text_seq:
             torch.nn.utils.rnn.pack_padded_sequence requires the sequence lengths sorted in decreasing order
         '''
         print("sorting samples ...")
-        samples.sort(key=lambda x: len(x[0]), reverse=True)
+        self.sort_indices = np.argsort([len(x[0]) for x in samples]).tolist()
+        self.sort_indices.reverse()
+        samples = np.array(samples)[self.sort_indices].tolist()
 
         vocab_path_pkl = "{}/wikibio_vocab_pt.pkl".format(prefix)
         vocab_path_js = "{}/wikibio_vocab_pt.json".format(prefix)
@@ -375,7 +377,7 @@ class Table2text_seq:
                 p_bck.append(1)
                 p_for_t = [1] + p_for_t + [1]
                 p_bck_t = [1] + p_bck_t + [1]
-                lab_t.append(src_len)
+                lab_t.append(src_len)  # <EOS>
                 src_len += 1  # <EOS>
                 tgt_len = len(value_t) + 2
             else:
