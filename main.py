@@ -238,22 +238,22 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
                     fout.write("{}\n".format(cands_with_pgens[c + 1]))
         if cands_ids is not None:
             eval_file_out_ids = "{}/evaluations/valid.epoch_{}.cand.ids.txt".format(save_file_dir, epoch)
+            cands_ids_original = [cands_ids[i+1] for i in dataset.sort_indices]
             with open(eval_file_out_ids, 'w+') as fout:
-                for c in range(len(cands_ids)):
-                    fout.write("{}\n".format(" ".join([str(x) for x in cands_ids[c + 1]])))
+                for c in range(len(cands_ids_original)):
+                    fout.write("{}\n".format(" ".join([str(x) for x in cands_ids_original[c]])))
 
         # ------------------------------------------------------------------------------------------ #
         # ---------------------------------------- Metrics ----------------------------------------- #
         # ------------------------------------------------------------------------------------------ #
-        valid_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch,
-                                               cands_ids=cands_ids, tgts_ids=tgts_ids)
+        valid_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch, cands_ids=cands_ids, tgts_ids=tgts_ids)
         metrics.run_logger(writer=writer, epoch=epoch)
 
+        # ------------------------------------------------------------------------------------------ #
+        # ----------------------------------- Eval on Training set --------------------------------- #
+        # ------------------------------------------------------------------------------------------ #
         cand, ref, pred_loss, others = predictor.preeval_batch(t4e_dataset)
-
-        train_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch,
-                                               cands_ids=cands_ids, tgts_ids=tgts_ids)
-
+        _ = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch, cands_ids=cands_ids, tgts_ids=tgts_ids)
         metrics.run_logger(writer=writer, epoch=epoch, cat='train_metrics')
 
         # ------------------------------------------------------------------------------------------ #
@@ -323,7 +323,7 @@ if __name__ == "__main__":
     L.info("Reading training data ...")
     t_dataset = Table2text_seq('train', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size,
                                train_mode=args.mode, dec_type=args.dec_type)
-    t4e_dataset = Table2text_seq('train4eval', type=args.type, USE_CUDA=args.cuda, batch_size=config.batch_size,
+    t4e_dataset = Table2text_seq('train4eval', type=args.type, USE_CUDA=args.cuda, batch_size=config.valid_batch,
                                train_mode=args.mode, dec_type=args.dec_type)
     # -------------------------------------------------------------------------------------------------- #
     # -------------------------------------- Building Model -------------------------------------------- #
@@ -505,6 +505,7 @@ if __name__ == "__main__":
 
         dataset = Table2text_seq(args.dataset, type=args.type, USE_CUDA=args.cuda,
                                  batch_size=config.valid_batch, dec_type=args.dec_type)
+        print(dataset.sort_indices)
         L.info("Read $-{}-$ data".format(args.dataset))
         predictor = Predictor(model, dataset.vocab, args.cuda,
                               decoder_type=args.dec_type, unk_gen=config.unk_gen, dataset_type=args.type)
@@ -549,9 +550,10 @@ if __name__ == "__main__":
 
         if cands_ids is not None:
             eval_file_out_ids = "{}/evaluations/{}.epoch_{}.cand.ids.txt".format(save_file_dir, args.dataset, load_epoch)
+            cands_ids_original = [cands_ids[i+1] for i in dataset.sort_indices]
             with open(eval_file_out_ids, 'w+') as fout:
-                for c in range(len(cands_ids)):
-                    fout.write("{}\n".format(" ".join([str(x) for x in cands_ids[c + 1]])))
+                for c in range(len(cands_ids_original)):
+                    fout.write("{}\n".format(" ".join([str(x) for x in cands_ids_original[c]])))
 
         ref_file_out = "{}/evaluations/{}.ref.sum.txt".format(save_file_dir, args.dataset)
         with open(ref_file_out, 'w+') as fout:

@@ -4,6 +4,7 @@ import pickle, sys, json, io, copy
 from os.path import expanduser
 HOME = expanduser("~")
 from tqdm import tqdm
+import numpy as np
 
 class Vocabulary:
     """Vocabulary class for mapping between words and ids"""
@@ -289,12 +290,13 @@ class Table2text_seq:
             total_field.append(field_s + field_t)
             samples.append([value_s, target, field_s, p_for_s, p_bck_s, table])
 
-        # TODO: reverse batches ???
         '''
             torch.nn.utils.rnn.pack_padded_sequence requires the sequence lengths sorted in decreasing order
         '''
         print("sorting samples ...")
-        samples.sort(key=lambda x: len(x[0]), reverse=True)
+        self.sort_indices = np.argsort([len(x[0]) for x in samples]).tolist()
+        self.sort_indices.reverse()
+        samples = np.array(samples)[self.sort_indices].tolist()
 
         vocab_path_pkl = "{}/wikibio_vocab_pt.pkl".format(prefix)
         vocab_path_js = "{}/wikibio_vocab_pt.json".format(prefix)
