@@ -6,7 +6,7 @@ from .baseRNN import BaseRNN
 
 class EncoderRNN(BaseRNN):
     def __init__(self, vocab_size=0, embedding=None,
-                 hidden_size=0, posit_size=0, embed_size=0, fdsize=0, dec_size=0,
+                 hidden_size=0, posit_size=0, embed_size=0, fdsize=0, dec_size=0, attn_hidden=64,
                  attn_src='emb', dropout_p=0, n_layers=1, rnn_cell='gru', directions=2,
                  variable_lengths=True, field_concat_pos=False,
                  field_embedding=None, pos_embedding=None, dataset_type=0, enc_type='rnn'):
@@ -25,14 +25,15 @@ class EncoderRNN(BaseRNN):
         self.field_embedding = field_embedding
         self.dataset_type = dataset_type
         self.enc_type = enc_type
+        self.dec_size = dec_size
+        self.attn_hidden = attn_hidden
         self.input_size = self.embed_size + self.fdsize + self.posit_size
 
         if self.enc_type == 'fc':
-            self.fc = nn.Sequential(nn.Linear(self.input_size, self.input_size), nn.ReLU())
-            # self.bridge_h = nn.Sequential(nn.Linear(self.input_size, self.hidden_size), nn.ReLU())
-            # if isinstance(self.rnn_cell, nn.LSTM):
-            #     self.bridge_c = nn.Sequential(nn.Linear(self.input_size, self.hidden_size), nn.ReLU())
-            self.linear = nn.Linear(self.input_size*2, self.input_size, bias=False)
+            self.fc = nn.Sequential(nn.Linear(self.input_size, self.dec_size), nn.ReLU())
+            self.attn_query = nn.Sequential(nn.Linear(self.dec_size, self.attn_hidden), nn.ELU(0.1))
+            self.attn_linear = nn.Linear(self.attn_hidden, self.attn_hidden, bias=False)
+            self.linear_out = nn.Linear(self.dec_size*2, self.dec_size, bias=False)
             self.softmax = nn.Softmax(dim=2)
         elif self.enc_type == 'rnn':
             self.rnn = self.rnn_cell(self.input_size,
@@ -83,18 +84,32 @@ class EncoderRNN(BaseRNN):
             mask = mask.repeat(1, sourceL, 1)
             mask_self_index = list(range(sourceL))
             mask[:, mask_self_index, mask_self_index] = 1
+            # print('mask: {}'.format(mask.size()))
 
             r = self.fc(embedded)
             r = self.dropout(r)
-            rt = r.transpose(1, 2)
+            r_query = self.attn_query(r)
+            # print('r_query: {}'.format(r_query.size()))
+            r_query_t = r_query.transpose(1, 2)
+            # print('r_query_t: {}'.format(r_query_t.size()))
+            r_key = self.attn_linear(r_query)
+            # print('r_key: {}'.format(r_key.size()))
 
-            align = torch.bmm(r, rt)
+            # (batch, t_len, d) x (batch, d, s_len) --> (batch, t_len, s_len)
+            align = torch.bmm(r_key, r_query_t)
             align.masked_fill_(mask.data.byte(), -1e10)
+            # print('align: {}'.format(align.size()))
+
             weights = self.softmax(align)
+            # print('weights: {}'.format(weights.size()))
             c = torch.bmm(weights, r)
-            r_att = self.linear(torch.cat([c, r], 2))
+            # print('c: {}'.format(c.size()))
+            r_att = self.linear_out(torch.cat([c, r], 2))
+            # print('r_att: {}'.format(r_att.size()))
             enc_outputs = torch.sigmoid(r_att).mul(r)
+            # print('enc_outputs: {}'.format(enc_outputs.size()))
             mean = torch.mean(enc_outputs, dim=1).unsqueeze(0)
+            # print('mean: {}'.format(mean.size()))
 
             # enc_state_h = self.bridge_h(mean)
             if self.rnn_type.lower() == 'lstm':
@@ -103,15 +118,6 @@ class EncoderRNN(BaseRNN):
             else:
                 enc_state = mean
 
-            # print('mask: {}'.format(mask.size()))
-            # print('mean: {}'.format(mean.size()))
-            # print('r: {}'.format(r.size()))
-            # print('rt: {}'.format(rt.size()))
-            # print('align: {}'.format(align.size()))
-            # print('weights: {}'.format(weights.size()))
-            # print('c: {}'.format(c.size()))
-            # print('r_att: {}'.format(r_att.size()))
-            # print('enc_outputs: {}'.format(enc_outputs.size()))
 
         if self.field_concat_pos:
             return enc_outputs, embed_input, embed_field_pos, embed_pos, enc_state, (enc_mask, enc_non_stop_mask)
