@@ -37,13 +37,17 @@ class Predictor(object):
         torch.set_grad_enabled(False)
         refs = {}
         cands = {}
-        cands_ids = {} if self.decoder_type == 'pt' and self.dataset_type == 3 else None
-        tgts_ids = {} if self.decoder_type == 'pt' and self.dataset_type == 3 else None
+        if self.decoder_type == 'pt' and self.dataset_type == 3:
+            cands_ids = {}
+            tgts_ids = {}
+            feats = {'fields': {}, 'rcds': {}, 'has': {}}
+        else:
+            cands_ids = None
+            tgts_ids = None
+            feats = {'fields': []}
         cands_with_pgens = {} if self.decoder_type == 'pg' else None
         cands_with_unks = {} if self.unk_gen else None
         srcs = {}
-        feats = {'fields': {}, 'rcds': {}, 'has': {}} \
-            if self.decoder_type == 'pt' and self.dataset_type == 3 else {'fields': []}
         i = 0
         pred_loss = 0
         figs_per_batch = 1
@@ -75,6 +79,7 @@ class Predictor(object):
                     out_seq_ids = locations[j].tolist()
                     out_seq_ids = out_seq_ids[:lens[j]-1]
                     cands_ids[i] = out_seq_ids
+                    # tgt_seq_ids = [(x,y) for x,y in zip(batch_t[j].tolist(), targets[j]) if x > 3]
                     tgt_seq_ids = [x for x in batch_t[j].tolist() if x > 3]
                     tgts_ids[i] = tgt_seq_ids
 
@@ -96,14 +101,18 @@ class Predictor(object):
                 pgen = p_gens[j] if p_gens is not None else None
                 out, out_unk, out_with_gens = self.post_process(out_seq_clean, out_seq_unk, pgen)
 
-                if fig and len(out) > 0 and j < figs_per_batch:
-                    fmatrix = selfatt[j] if selfatt is not None else None
-                    self.make_figure(lens[j], out, fmatrix, attns[j], batch_pf[j], sources[j], batch_idx+j, save_dir)
                 cands[i] = ' '.join(out)
+                # if locations is not None:
+                #     cands_ids[i] = list(zip(out_seq_ids, out))
+
                 if self.decoder_type == 'pg':
                     cands_with_pgens[i] = ' '.join(out_with_gens)
                 if self.unk_gen:
                     cands_with_unks[i] = ' '.join(out_unk)
+
+                if fig and len(out) > 0 and j < figs_per_batch:
+                    fmatrix = selfatt[j] if selfatt is not None else None
+                    self.make_figure(lens[j], out, fmatrix, attns[j], batch_pf[j], sources[j], batch_idx+j, save_dir)
 
         others = (cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats)
 

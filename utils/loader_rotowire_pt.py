@@ -5,6 +5,7 @@ from os.path import expanduser
 HOME = expanduser("~")
 from tqdm import tqdm
 import numpy as np
+from utils.content_metrics import Content_Metrics
 
 class Vocabulary:
     """Vocabulary class for mapping between words and ids"""
@@ -234,6 +235,7 @@ class Table2text_seq:
                  train_mode=0, dec_type='pg'):
         # TODO: change the path
         prefix = "{}/table2text_nlg/data/dkb/rotowire_pt/".format(HOME)
+
         assert type == 3
         self.vocab = None
         self.dec_type = dec_type
@@ -259,6 +261,7 @@ class Table2text_seq:
             raise ValueError("Only train, valid, test data_srcs are supported")
 
         # ----------------------- load triples and build vocabulary ------------------------- #
+        self.prepare_content_metrics()
         if data_src == 'train' and (train_mode != 0 and train_mode != 1):  # training(0) and resume training(1)
             self.data = self.load_data_light(path)
         else:
@@ -268,6 +271,54 @@ class Table2text_seq:
             self.corpus = self.batchfy()
 
         print("vocab size = {}".format(self.vocab.size))
+
+    def prepare_content_metrics(self):
+        domain = 'train' if 'train' in self.data_src else self.data_src
+        self.content_metrics = Content_Metrics()
+        self.goldfi = "{}/table2text_nlg/harvardnlp/data2text-plan-py/rotowire/{}/roto-gold-{}.h5-tuples.txt".format(HOME, domain, domain)
+        self.gold_triples = self._get_gold_triples()[1:]
+
+        self.src_file = "{}/table2text_nlg/harvardnlp/data2text-plan-py/rotowire/{}/src_{}.txt".format(HOME, domain, domain)
+        inputs = []
+        with io.open(self.src_file, 'r', encoding="utf-8") as fin:
+            for _, line in enumerate(fin):
+                inputs.append(line.split())
+        self.inputs = inputs
+
+    def _get_gold_triples(self):
+        all_triples = []
+        curr = []
+        with open(self.goldfi) as f:
+            for line in f:
+                if line.isspace():
+                    all_triples.append(self.content_metrics.dedup(curr))
+                    curr = []
+                else:
+                    pieces = line.strip().split('|')
+                    pieces = [pieces[0].lower()] + pieces[1:]
+                    curr.append(tuple(pieces))
+        if len(curr) > 0:
+            all_triples.append(self.content_metrics.dedup(curr))
+        return all_triples
+
+    def _get_pred_triples(self, pred_ids):
+
+        DELIM = u"￨"
+
+        eval_outputs = []
+        for i, sample in tqdm(enumerate(self.inputs)):
+            content_plan = pred_ids[i]
+            eval_output = []
+            for record in content_plan:
+                elements = sample[int(record)].split(DELIM)
+                if elements[0].isdigit():
+                    record_type = elements[2]
+                    if not elements[2].startswith('TEAM'):
+                        record_type = 'PLAYER-' + record_type
+                    eval_output.append((elements[1].replace("_", " ").strip('<').strip('>').lower(), elements[0], record_type))
+            eval_outputs.append(eval_output)
+
+        return eval_outputs
 
     def load_data_light(self, path):
         print("Loading data ** LIGHT ** from {}".format(path))

@@ -54,8 +54,8 @@ class ConfigRotowire(object):
         self.dropout = 0.5
         self.directions = 1
         self.max_grad_norm = 5
-        self.max_len = 80
-        self.min_len = 20
+        self.max_len = 100
+        self.min_len = 35
         self.unk_gen = True  # allow generating UNK
 
 class ConfigSmall(object):

@@ -28,7 +28,7 @@ L.info("Running %s" % ' '.join(sys.argv))
 # -------------------------------------------------------------------------------------------------- #
 
 parser = argparse.ArgumentParser(description='pointer generator model')
-parser.add_argument('--seed', type=int, default=1234,
+parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
 parser.add_argument('--cuda', action='store_false',
                     help='use CUDA')
@@ -82,6 +82,8 @@ parser.add_argument('--shuffle', action='store_true',
 
 parser.add_argument('--fig', action='store_true',
                     help='generate attention visualization figures for evaluation')
+parser.add_argument('--verbose', action='store_true',
+                    help='print sample outputs')
 
 args = parser.parse_args()
 
@@ -208,19 +210,20 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
         L.info('Result:')
         L.info('valid_loss: {}'.format(valid_loss))
         L.info('pred_loss: {}'.format(pred_loss))
-        L.info('\nsource[1]: {}'.format(srcs[1]))
-        for k, v in feats.items():
-            L.info('\n{}[1]: {}'.format(k, v[1]))
-        if config.unk_gen:
-            print('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
-        if cands_with_pgens is not None:
-            print('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
-        if cands_ids is not None:
-            print('\ncands_ids[1]: {}'.format(cands_ids[1]))
-        if tgts_ids is not None:
-            print('\ntgts_ids[1]: {}'.format(tgts_ids[1]))
-        print('\nref[1]: {}'.format(ref[1][0]))
-        print('\ncand[1]: {}'.format(cand[1]))
+        if args.verbose:
+            L.info('\nsource[1]: {}'.format(srcs[1]))
+            for k, v in feats.items():
+                L.info('\n{}[1]: {}'.format(k, v[1]))
+            if config.unk_gen:
+                print('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
+            if cands_with_pgens is not None:
+                print('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
+            if cands_ids is not None:
+                print('\ncands_ids[1]: {}'.format(cands_ids[1]))
+            if tgts_ids is not None:
+                print('\ntgts_ids[1]: {}'.format(tgts_ids[1]))
+            print('\nref[1]: {}'.format(ref[1][0]))
+            print('\ncand[1]: {}'.format(cand[1]))
 
         eval_file_out = "{}/evaluations/valid.epoch_{}.cand.live.txt".format(save_file_dir, epoch)
         with open(eval_file_out, 'w+') as fout:
@@ -238,7 +241,7 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
                     fout.write("{}\n".format(cands_with_pgens[c + 1]))
         if cands_ids is not None:
             eval_file_out_ids = "{}/evaluations/valid.epoch_{}.cand.ids.txt".format(save_file_dir, epoch)
-            cands_ids_original = [cands_ids[i+1] for i in dataset.sort_indices]
+            cands_ids_original = [cands_ids[i+1] for i in v_dataset.sort_indices]
             with open(eval_file_out_ids, 'w+') as fout:
                 for c in range(len(cands_ids_original)):
                     fout.write("{}\n".format(" ".join([str(x) for x in cands_ids_original[c]])))
@@ -246,14 +249,19 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
         # ------------------------------------------------------------------------------------------ #
         # ---------------------------------------- Metrics ----------------------------------------- #
         # ------------------------------------------------------------------------------------------ #
-        valid_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch, cands_ids=cands_ids, tgts_ids=tgts_ids)
+        valid_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch,
+                                               cands_ids=cands_ids_original, dataset=v_dataset)
         metrics.run_logger(writer=writer, epoch=epoch)
 
         # ------------------------------------------------------------------------------------------ #
         # ----------------------------------- Eval on Training set --------------------------------- #
         # ------------------------------------------------------------------------------------------ #
         cand, ref, pred_loss, others = predictor.preeval_batch(t4e_dataset)
-        _ = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch, cands_ids=cands_ids, tgts_ids=tgts_ids)
+        _, _, train_cands_ids, _, _, _ = others
+        if train_cands_ids is not None:
+            train_cands_ids_original = [train_cands_ids[i+1] for i in t4e_dataset.sort_indices]
+        _ = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch,
+                                    cands_ids=train_cands_ids_original, dataset=t4e_dataset)
         metrics.run_logger(writer=writer, epoch=epoch, cat='train_metrics')
 
         # ------------------------------------------------------------------------------------------ #
@@ -315,6 +323,7 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------------- Main ------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------- #
+# noinspection PyUnboundLocalVariable
 if __name__ == "__main__":
     metrics = Metrics()
     # -------------------------------------------------------------------------------------------------- #
@@ -449,6 +458,7 @@ if __name__ == "__main__":
     # ----------------------------------- resume train ----------------------------------------- #
     # ------------------------------------------------------------------------------------------ #
     elif args.mode == 1:
+        # TODO: catch up with the other parts
         model.load_state_dict(torch.load(args.save))
         load_epoch = int(args.save.split('.')[-1])
         L.info("model restored from epoch-{}: {}".format(load_epoch, args.save))
@@ -480,20 +490,21 @@ if __name__ == "__main__":
 
         L.info('Result:')
         L.info('pred_loss: {}'.format(pred_loss))
-        print('\nref[1]: {}'.format(ref[1][0]))
-        print('\ncand[1]: {}'.format(cand[1]))
-        print('\nsource[1]: {}'.format(srcs[1]))
-        for k, v in feats.items():
-            print('\n{}[1]: {}'.format(k, v[1]))
-        if config.unk_gen:
-            print('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
-        if cands_with_pgens is not None:
-            print('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
-        if cands_ids is not None:
-            print('\ncands_ids[1]: {}'.format(cands_ids[1]))
+        if args.verbose:
+            print('\nref[1]: {}'.format(ref[1][0]))
+            print('\ncand[1]: {}'.format(cand[1]))
+            print('\nsource[1]: {}'.format(srcs[1]))
+            for k, v in feats.items():
+                print('\n{}[1]: {}'.format(k, v[1]))
+            if config.unk_gen:
+                print('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
+            if cands_with_pgens is not None:
+                print('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
+            if cands_ids is not None:
+                print('\ncands_ids[1]: {}'.format(cands_ids[1]))
 
         final_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=load_epoch,
-                                               cands_ids=cands_ids, tgts_ids=tgts_ids)
+                                               cands_ids=cands_ids, dataset=dataset)
 
     # --------------------------------------------------------------------------------------- #
     # ----------------------------------- evaluation ---------------------------------------- #
@@ -518,18 +529,19 @@ if __name__ == "__main__":
         L.info('Result:')
         L.info('pred_loss: {}'.format(pred_loss))
         print('\nsource[1]: {}'.format(srcs[1]))
-        for k, v in feats.items():
-            print('\n{}[1]: {}'.format(k, v[1]))
-        if config.unk_gen:
-            print('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
-        if cands_with_pgens is not None:
-            print('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
-        if cands_ids is not None:
-            print('\ncands_ids[1]: {}'.format(cands_ids[1]))
-        if tgts_ids is not None:
-            print('\ntgts_ids[1]: {}'.format(tgts_ids[1]))
-        print('\nref[1]: {}'.format(ref[1][0]))
-        print('\ncand[1]: {}'.format(cand[1]))
+        if args.verbose:
+            for k, v in feats.items():
+                print('\n{}[1]: {}'.format(k, v[1]))
+            if config.unk_gen:
+                print('\ncands_with_unks[1]: {}'.format(cands_with_unks[1]))
+            if cands_with_pgens is not None:
+                print('\ncands_with_pgens[1]: {}'.format(cands_with_pgens[1]))
+            if cands_ids is not None:
+                print('\ncands_ids[1]: {}'.format(cands_ids[1]))
+            if tgts_ids is not None:
+                print('\ntgts_ids[1]: {}'.format(tgts_ids[1]))
+            print('\nref[1]: {}'.format(ref[1][0]))
+            print('\ncand[1]: {}'.format(cand[1]))
 
         cand_file_out = "{}/evaluations/{}.epoch_{}.cand.txt".format(save_file_dir, args.dataset, load_epoch)
         with open(cand_file_out, 'w+') as fout:
@@ -581,4 +593,4 @@ if __name__ == "__main__":
                 fout.write("{}\n".format(feats['fields'][f+1]))
 
         final_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=load_epoch,
-                                               cands_ids=cands_ids, tgts_ids=tgts_ids)
+                                               cands_ids=cands_ids_original, dataset=dataset)
