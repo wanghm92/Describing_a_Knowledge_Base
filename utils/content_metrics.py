@@ -114,7 +114,10 @@ class Content_Metrics(object):
             if found is None:
                 s2 += chr(next_char)
                 next_char += 1
-                assert next_char <= 128
+                # assert next_char <= 128
+                if next_char > 128:
+                    print("WARNING: Max chars reached")
+                    break
             else:
                 s2 += found
         # return 1- , since this thing gives 0 to perfect matches etc
