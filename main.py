@@ -84,6 +84,8 @@ parser.add_argument('--fig', action='store_true',
                     help='generate attention visualization figures for evaluation')
 parser.add_argument('--verbose', action='store_true',
                     help='print sample outputs')
+parser.add_argument('--xavier', action='store_true',
+                    help='xavier initialization')
 
 args = parser.parse_args()
 
@@ -370,7 +372,7 @@ if __name__ == "__main__":
 
     encoder = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding,
                          embed_size=config.emsize, fdsize=fd_size,
-                         hidden_size=hidden_size, posit_size=posit_size,
+                         hidden_size=hidden_size, posit_size=posit_size, dec_size=hidden_size,
                          attn_src=args.attn_src,
                          dropout_p=config.dropout, n_layers=config.nlayers,
                          rnn_cell=config.cell, directions=config.directions,
@@ -394,45 +396,48 @@ if __name__ == "__main__":
     model = Seq2seq(encoder, decoder).to(device)
     if config.optimizer == 'adam':
         optimizer = optim.Adam(model.parameters(), lr=config.lr)
+        # scheduler = ReduceLROnPlateau(optimizer, 'min', factor=args.decay) if args.decay < 1 else None
+        # milestones = list(range(config.decay_start, config.epochs))
+        # scheduler = MultiStepLR(optimizer, milestones, gamma=config.decay_rate) if config.decay_rate < 1 else None
+        # scheduler = ReduceLROnPlateau(optimizer, 'min', patience=1, verbose=True)
+        scheduler = ExponentialLR(optimizer, gamma=config.decay_rate) if config.decay_rate < 1 else None
     elif config.optimizer == 'adagrad':
         optimizer = optim.Adagrad(model.parameters(), lr=config.lr, lr_decay=config.decay_rate,
                                   initial_accumulator_value=0.1)
+        scheduler = None
     else:
         raise ValueError("{} optimizer not supported".format(args.optim))
-
-    # scheduler = ReduceLROnPlateau(optimizer, 'min', factor=args.decay) if args.decay < 1 else None
-    # milestones = list(range(config.decay_start, config.epochs))
-    # scheduler = MultiStepLR(optimizer, milestones, gamma=config.decay_rate) if config.decay_rate < 1 else None
-    # scheduler = ReduceLROnPlateau(optimizer, 'min', patience=1, verbose=True)
-    scheduler = ExponentialLR(optimizer, gamma=config.decay_rate) if config.decay_rate < 1 else None
 
     # -------------------------------------------------------------------------------------------------- #
     # -------------------------------------- Model parameters ------------------------------------------ #
     # -------------------------------------------------------------------------------------------------- #
     L.info("Model parameters: ")
     params_dict = {}
-    for name, param in model.named_parameters():
-        if param.requires_grad:
-            if 'rnn' in name or 'V' in name or 'embedding' in name:
-                if 'bias' in name:
-                    nn.init.constant_(param, 0.0)
-                    params_dict["[Constant-0][{}] {}".format(param.dtype, name)] = param.size()
-                    # print("Constant(0): {}".format(name))
-                else:
-                    nn.init.xavier_uniform_(param)
-                    params_dict["[Xavier][{}] {}".format(param.dtype, name)] = param.size()
-            else:
-                try:
-                    nn.init.xavier_uniform_(param)
-                    params_dict["[Xavier][{}] {}".format(param.dtype, name)] = param.size()
-                except:
-                    if param.size()[0] == 1:
+    if args.xavier:
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                if 'rnn' in name or 'V' in name or 'embedding' in name:
+                    if 'bias' in name:
                         nn.init.constant_(param, 0.0)
                         params_dict["[Constant-0][{}] {}".format(param.dtype, name)] = param.size()
+                        # print("Constant(0): {}".format(name))
                     else:
-                        params_dict["[Uniform: 1/dim*0.5][{}] {}".format(param.dtype, name)] = param.size()
+                        nn.init.xavier_uniform_(param)
+                        params_dict["[Xavier][{}] {}".format(param.dtype, name)] = param.size()
+                else:
+                    try:
+                        nn.init.xavier_uniform_(param)
+                        params_dict["[Xavier][{}] {}".format(param.dtype, name)] = param.size()
+                    except:
+                        if param.size()[0] == 1:
+                            nn.init.constant_(param, 0.0)
+                            params_dict["[Constant-0][{}] {}".format(param.dtype, name)] = param.size()
+                        else:
+                            params_dict["[Uniform: 1/dim*0.5][{}] {}".format(param.dtype, name)] = param.size()
 
-    pprint.pprint(params_dict, indent=2)
+        pprint.pprint(params_dict, indent=2)
+    else:
+        pprint.pprint(model.named_parameters(), indent=2)
     # ------------------------------------------------------------------------------------------ #
     # --------------------------------------- train -------------------------------------------- #
     # ------------------------------------------------------------------------------------------ #
