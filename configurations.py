@@ -34,11 +34,11 @@ class ConfigWikibio(object):
         self.max_len = 100
         self.unk_gen = True  # allow generating UNK
 
-class ConfigRotowire(object):
+class ConfigRotowire_bk(object):
     def __init__(self):
         self.cell = "LSTM"
         self.optimizer = "adam"
-        self.decay_rate = 0.9
+        self.decay_rate = 0.97
         self.decay_start = 1
         self.emsize = 256
         self.fdsize = 128
@@ -51,10 +51,34 @@ class ConfigRotowire(object):
         self.epochs = 30
         self.batch_size = 4
         self.valid_batch = 64
-        self.dropout = 0.5
+        self.dropout = 0.3
         self.directions = 1
         self.max_grad_norm = 5
-        self.max_len = 100
+        self.max_len = 80
+        self.min_len = 35
+        self.unk_gen = True  # allow generating UNK
+
+class ConfigRotowire(object):
+    def __init__(self):
+        self.cell = "LSTM"
+        self.optimizer = "adam"
+        self.decay_rate = 0.97
+        self.decay_start = 4
+        self.emsize = 600
+        self.fdsize = 600
+        self.rcdsize = 600
+        self.hasize = 600
+        self.hdsize = 600
+        self.pemsize = 5
+        self.nlayers = 1
+        self.lr = 0.0002
+        self.epochs = 30
+        self.batch_size = 4
+        self.valid_batch = 64
+        self.dropout = 0.3
+        self.directions = 1
+        self.max_grad_norm = 5
+        self.max_len = 80
         self.min_len = 35
         self.unk_gen = True  # allow generating UNK
 
