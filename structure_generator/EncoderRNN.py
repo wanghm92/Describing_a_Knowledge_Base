@@ -8,7 +8,7 @@ class EncoderRNN(BaseRNN):
     def __init__(self, vocab_size=0, embedding=None,
                  hidden_size=0, posit_size=0, embed_size=0, fdsize=0, dec_size=0, attn_size=0,
                  attn_src='emb', dropout_p=0, n_layers=1, rnn_cell='gru', directions=2,
-                 variable_lengths=True, field_concat_pos=False,
+                 variable_lengths=True, field_cat_pos=False,
                  field_embedding=None, pos_embedding=None, dataset_type=0, enc_type='rnn'):
 
         self.rnn_type = rnn_cell.lower()
@@ -19,7 +19,7 @@ class EncoderRNN(BaseRNN):
         self.fdsize = fdsize
         self.posit_size = posit_size
         self.variable_lengths = variable_lengths
-        self.field_concat_pos = field_concat_pos
+        self.field_cat_pos = field_cat_pos
         self.pos_embedding = pos_embedding
         self.embedding = embedding
         self.field_embedding = field_embedding
@@ -125,7 +125,7 @@ class EncoderRNN(BaseRNN):
                 enc_state = mean
 
 
-        if self.field_concat_pos:
+        if self.field_cat_pos:
             return enc_outputs, embed_input, embed_field_pos, embed_pos, enc_state, (enc_mask, enc_non_stop_mask)
         else:
             return enc_outputs, embed_input, embed_field, embed_pos, enc_state, (enc_mask, enc_non_stop_mask)

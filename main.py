@@ -36,7 +36,7 @@ parser.add_argument('--dec_type', type=str, default='pg', choices=['pg', 'pt', '
                     help='decoder model type pg(pointer-generator)/pt(pointer-net)(WIP)/seq(seq2seq)')
 parser.add_argument('--ptr_input', type=str, default='emb', choices=['emb', 'hid'],
                     help='input to pointer-network emb: normal word+feat/hidden: memory bank hidden vectors')
-parser.add_argument('--dec_feat_merge', type=str, default='mlp', choices=['concat', 'mlp'],
+parser.add_argument('--dec_feat_merge', type=str, default='mlp', choices=['cat', 'mlp'],
                     help='merge input embeddings for decoder')
 parser.add_argument('--enc_type', type=str, default='rnn', choices=['rnn', 'fc', 'trans'],
                     help='encoder model type')
@@ -55,10 +55,10 @@ parser.add_argument('--batch', type=int, default='64',
 parser.add_argument('--max_len', type=int, default='100',
                     help='max_len')
 
-parser.add_argument('--attn_type', type=str, default='concat', choices=['concat', 'dot'],
-                    help='type of attention score calculation: concat, dot')
-parser.add_argument('--attn_fuse', type=str, default='concat', choices=['concat', 'prod', 'no'],
-                    help='type of attention score aggregation: concat, prod, no')
+parser.add_argument('--attn_type', type=str, default='cat', choices=['cat', 'dot'],
+                    help='type of attention score calculation: cat, dot')
+parser.add_argument('--attn_fuse', type=str, default='cat', choices=['cat', 'prod', 'no'],
+                    help='type of attention score aggregation: cat, prod, no')
 parser.add_argument('--attn_level', type=int, default=2, choices=[1, 2, 3],
                     help='levels of attention: 1(hidden only), 2(hidden+field), 3(hidden+word+field) hidden=rnn/emb')
 parser.add_argument('--attn_src', type=str, default='emb', choices=['emb', 'rnn'],
@@ -73,13 +73,13 @@ parser.add_argument('--cov_in_pgen', action='store_true',
 
 parser.add_argument('--field_self_att', action='store_true',
                     help='whether use field self-attention')
-parser.add_argument('--field_concat_pos', action='store_true',
-                    help='whether concat pos embeddings to field embeddings for attention calculation')
+parser.add_argument('--field_cat_pos', action='store_true',
+                    help='whether cat pos embeddings to field embeddings for attention calculation')
 parser.add_argument('--field_context', action='store_false',
                     help='whether pass context vector of field embeddings to output layer')
 
 parser.add_argument('--pt_dec_feat', action='store_true',
-                    help='whether to concat features for ptr-net decoder')
+                    help='whether to cat features for ptr-net decoder')
 
 parser.add_argument('--context_mlp', action='store_true',
                     help='MLP layer on context vectors before output layer')
@@ -130,7 +130,7 @@ if args.type == 2:
     from utils.loader_wikibio_pt import Table2text_seq
 elif args.type == 3:
     config = ConfigRotowire()
-    args.field_concat_pos = True
+    args.field_cat_pos = True
     from utils.loader_rotowire_pt import Table2text_seq
 else:
     config = Config()
@@ -394,7 +394,7 @@ if __name__ == "__main__":
                          attn_src=args.attn_src,
                          dropout_p=config.dropout, n_layers=config.nlayers,
                          rnn_cell=config.cell, directions=config.directions,
-                         variable_lengths=True, field_concat_pos=args.field_concat_pos,
+                         variable_lengths=True, field_cat_pos=args.field_cat_pos,
                          field_embedding=field_embedding, pos_embedding=pos_embedding,
                          dataset_type=args.type, enc_type=args.enc_type)
     decoder = DecoderRNN(dec_type=args.dec_type, ptr_input=args.ptr_input, dec_feat_merge=args.dec_feat_merge,
@@ -406,7 +406,7 @@ if __name__ == "__main__":
                          attn_type=args.attn_type, attn_fuse=args.attn_fuse,
                          pt_dec_feat=args.pt_dec_feat,
                          use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
-                         field_self_att=args.field_self_att, field_concat_pos=args.field_concat_pos,
+                         field_self_att=args.field_self_att, field_cat_pos=args.field_cat_pos,
                          field_context=args.field_context, context_mlp=args.context_mlp,
                          mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen,
                          max_len=config.max_len, min_len=config.min_len,

@@ -14,10 +14,10 @@ class DecoderRNN(BaseRNN):
                  vocab_size=0, embedding=None, embed_size=0, hidden_size=0, fdsize=0, posit_size=0,
                  sos_id=3, eos_id=2, unk_id=1,
                  rnn_cell='gru', directions=2,
-                 attn_src='emb', attn_type='concat', attn_fuse='sum', attn_level=2,
+                 attn_src='emb', attn_type='cat', attn_fuse='sum', attn_level=2,
                  pt_dec_feat=False,
                  use_cov_loss=True, use_cov_attn=True, cov_in_pgen=False,
-                 field_self_att=False, field_concat_pos=False, field_context=False, context_mlp=False,
+                 field_self_att=False, field_cat_pos=False, field_context=False, context_mlp=False,
                  mask=False, use_cuda=True, unk_gen=False,
                  n_layers=1, dropout_p=0, max_len=100, min_len=20, lmbda=1.5,
                  field_embedding=None, pos_embedding=None, dataset_type=0):
@@ -36,7 +36,7 @@ class DecoderRNN(BaseRNN):
         self.use_cov_attn = use_cov_attn
         self.cov_in_pgen = cov_in_pgen
         self.field_self_att = field_self_att
-        self.field_concat_pos = field_concat_pos
+        self.field_cat_pos = field_cat_pos
         self.field_context = field_context
         self.context_mlp = context_mlp
         self.output_size = vocab_size
@@ -76,11 +76,11 @@ class DecoderRNN(BaseRNN):
         # ----------------- params for attention score ----------------- #
         field_input_size = fdsize
         # print('enc_input_size: {}'.format(enc_input_size))
-        if self.attn_level > 1 and self.field_concat_pos:
+        if self.attn_level > 1 and self.field_cat_pos:
             field_input_size += self_size
         # print('field_input_size: {}'.format(field_input_size))
 
-        if self.attn_fuse == 'concat':
+        if self.attn_fuse == 'cat':
             self.v = nn.Linear(hidden_size, 1, bias=False)
             self.Wd = nn.Linear(hidden_size, hidden_size)  # e_t decoder current state
         else:
@@ -181,7 +181,7 @@ class DecoderRNN(BaseRNN):
                     if self.dec_feat_merge == 'mlp':
                         # TODO: try share the same fc/linear layer with encoder
                         self.input_mlp = nn.Sequential(nn.Linear(self.input_size, embed_size), nn.ReLU())
-                    elif self.dec_feat_merge == 'concat':
+                    elif self.dec_feat_merge == 'cat':
                         self.input_size += (fdsize + posit_size)
                     else:
                         raise ValueError("{} feat_merge type not supported".format(self.dec_feat_merge))
@@ -263,7 +263,7 @@ class DecoderRNN(BaseRNN):
         return enc_hidden_keys, enc_input_keys, enc_field_keys
 
 
-    def _attn_score_concat(self, batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask):
+    def _attn_score_cat(self, batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask):
         """
         attention score in the form e = v` tanh(Wx+b)
         :param dec_query:  attention query vectors
@@ -305,17 +305,17 @@ class DecoderRNN(BaseRNN):
             # NOTE: here et is masked to -1e10 at paddings
             return et
 
-    def _attn_score(self, batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask, attn_type='concat'):
-        """ Wrapper for two types of attention scores: concat and dot"""
+    def _attn_score(self, batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask, attn_type='cat'):
+        """ Wrapper for two types of attention scores: cat and dot"""
 
-        if attn_type == 'concat':
-            return self._attn_score_concat(batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask)
+        if attn_type == 'cat':
+            return self._attn_score_cat(batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask)
         else:
             return self._attn_score_dot(dec_query, enc_keys, enc_mask)
 
-    def _get_attn_score_fuse_concat(self, batch_size, max_enc_len, cov_vector, enc_mask,
+    def _get_attn_score_fuse_cat(self, batch_size, max_enc_len, cov_vector, enc_mask,
                                     dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys):
-        """ normal multi-source attention score using concat"""
+        """ normal multi-source attention score using cat"""
 
         dec_query = self.Wd(dec_hidden)
 
@@ -339,7 +339,7 @@ class DecoderRNN(BaseRNN):
         return torch.div(t, normalizer)
 
     def _get_attn_score_fuse_hierarchical(self, batch_size, max_enc_len, cov_vector, enc_mask, dec_hidden,
-                                          enc_hidden_keys, enc_input_keys, enc_field_keys, attn_type='concat'):
+                                          enc_hidden_keys, enc_input_keys, enc_field_keys, attn_type='cat'):
         """ aggregated attention score with normalization from lower layers"""
 
         attn_score_top = None
@@ -411,8 +411,8 @@ class DecoderRNN(BaseRNN):
         else:
             cov_vector = None
 
-        if self.attn_fuse == 'concat':
-            return self._get_attn_score_fuse_concat(batch_size, max_enc_len, cov_vector, enc_mask,
+        if self.attn_fuse == 'cat':
+            return self._get_attn_score_fuse_cat(batch_size, max_enc_len, cov_vector, enc_mask,
                                                     dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys)
         else:
             return self._get_attn_score_fuse_hierarchical(batch_size, max_enc_len, cov_vector, enc_mask, dec_hidden,
