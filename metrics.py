@@ -66,22 +66,20 @@ class Metrics(object):
         # start_time = time.time()
         precision, recall, f1, ndld = self.content_metrics(pred, dataset)
         # end_time = time.time()
-        # print('\nTime used: {:.3f}'.format(end_time-start_time))
-        # print('[epoch-{}]precision:\t{}'.format(epoch, precision))
-        # print('[epoch-{}]recall:\t{}'.format(epoch, recall))
-        # print('[epoch-{}]f1:\t{}'.format(epoch, f1))
-        # print('[epoch-{}]ndld:\t{}'.format(epoch, ndld))
-
+        self.final_scores['num_precision'] = 100.0*precision
+        self.final_scores['num_recall'] = 100.0*recall
+        self.final_scores['num_f1'] = 100.0*f1
+        self.final_scores['num_ndld'] = 100.0*ndld
         # TODO: used for training
         # start_time = time.time()
         precision, recall, f1, ndld = self.non_rg_metrics(pred, gold)
         # end_time = time.time()
         # print('\nTime used: {:.3f}'.format(end_time-start_time))
 
-        self.final_scores['precision'] = 100.0*precision
-        self.final_scores['recall'] = 100.0*recall
-        self.final_scores['f1'] = 100.0*f1
-        self.final_scores['ndld'] = 100.0*ndld
+        self.final_scores['all_precision'] = 100.0*precision
+        self.final_scores['all_recall'] = 100.0*recall
+        self.final_scores['all_f1'] = 100.0*f1
+        self.final_scores['all_ndld'] = 100.0*ndld
 
         for k, v in self.final_scores.items():
             print('[epoch-{}]{}:\t{}'.format(epoch, k, v))
@@ -146,10 +144,10 @@ class Metrics(object):
         bleu_2 = self.final_scores['Bleu_2']
         bleu_3 = self.final_scores['Bleu_3']
         bleu_4 = self.final_scores['Bleu_4']
-        precision = self.final_scores['precision']
-        recall = self.final_scores['recall']
-        f1 =self. final_scores['f1']
-        dis = self.final_scores['ndld']
+        precision = self.final_scores['num_precision']
+        recall = self.final_scores['num_recall']
+        f1 =self. final_scores['num_f1']
+        dis = self.final_scores['num_ndld']
         writer.add_scalar('{}/ROUGE_L'.format(cat), rouge_l, epoch)
         writer.add_scalar('{}/Bleu_1'.format(cat), bleu_1, epoch)
         writer.add_scalar('{}/Bleu_2'.format(cat), bleu_2, epoch)

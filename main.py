@@ -34,6 +34,10 @@ parser.add_argument('--cuda', action='store_false',
                     help='use CUDA')
 parser.add_argument('--dec_type', type=str, default='pg', choices=['pg', 'pt', 'seq'],
                     help='decoder model type pg(pointer-generator)/pt(pointer-net)(WIP)/seq(seq2seq)')
+parser.add_argument('--ptr_input', type=str, default='emb', choices=['emb', 'hid'],
+                    help='input to pointer-network emb: normal word+feat/hidden: memory bank hidden vectors')
+parser.add_argument('--dec_feat_merge', type=str, default='mlp', choices=['concat', 'mlp'],
+                    help='merge input embeddings for decoder')
 parser.add_argument('--enc_type', type=str, default='rnn', choices=['rnn', 'fc', 'trans'],
                     help='encoder model type')
 parser.add_argument('--save', type=str, default='params.pkl',
@@ -393,7 +397,8 @@ if __name__ == "__main__":
                          variable_lengths=True, field_concat_pos=args.field_concat_pos,
                          field_embedding=field_embedding, pos_embedding=pos_embedding,
                          dataset_type=args.type, enc_type=args.enc_type)
-    decoder = DecoderRNN(dec_type=args.dec_type, vocab_size=t_dataset.vocab.size, embedding=embedding,
+    decoder = DecoderRNN(dec_type=args.dec_type, ptr_input=args.ptr_input, dec_feat_merge=args.dec_feat_merge,
+                         vocab_size=t_dataset.vocab.size, embedding=embedding,
                          embed_size=config.emsize, hidden_size=hidden_size, fdsize=fd_size, posit_size=posit_size,
                          sos_id=3, eos_id=2, unk_id=1,
                          rnn_cell=config.cell, directions=config.directions,
