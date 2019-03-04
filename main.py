@@ -74,6 +74,9 @@ parser.add_argument('--field_concat_pos', action='store_true',
 parser.add_argument('--field_context', action='store_false',
                     help='whether pass context vector of field embeddings to output layer')
 
+parser.add_argument('--pt_dec_feat', action='store_true',
+                    help='whether to concat features for ptr-net decoder')
+
 parser.add_argument('--context_mlp', action='store_true',
                     help='MLP layer on context vectors before output layer')
 
@@ -264,13 +267,13 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
         # ---------------------------- Eval and Metrics on Training set ---------------------------- #
         # ------------------------------------------------------------------------------------------ #
         cand, ref, perplexity, others = predictor.preeval_batch(t4e_dataset)
-        _, _, train_cands_ids, _, _, _ = others
+        _, _, train_cands_ids, train_tgts_ids, _, _ = others
         if epoch > 0:
             writer.add_scalar('perplexity/train', perplexity, epoch)
         if train_cands_ids is not None:
             train_cands_ids_original = [train_cands_ids[i+1] for i in t4e_dataset.sort_indices]
         _ = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch,
-                                    cands_ids=train_cands_ids_original, dataset=t4e_dataset, tgts_ids=tgts_ids)
+                                    cands_ids=train_cands_ids_original, dataset=t4e_dataset, tgts_ids=train_tgts_ids)
         metrics.run_logger(writer=writer, epoch=epoch, cat='train_metrics')
 
         # ------------------------------------------------------------------------------------------ #
@@ -396,6 +399,7 @@ if __name__ == "__main__":
                          rnn_cell=config.cell, directions=config.directions,
                          attn_src=args.attn_src, attn_level=args.attn_level,
                          attn_type=args.attn_type, attn_fuse=args.attn_fuse,
+                         pt_dec_feat=args.pt_dec_feat,
                          use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
                          field_self_att=args.field_self_att, field_concat_pos=args.field_concat_pos,
                          field_context=args.field_context, context_mlp=args.context_mlp,
@@ -407,7 +411,7 @@ if __name__ == "__main__":
     model = Seq2seq(encoder, decoder).to(device)
     if config.optimizer == 'adam':
         optimizer = optim.Adam(model.parameters(), lr=config.lr)
-        # scheduler = ReduceLROnPlateau(optimizer, 'min', factor=args.decay) if args.decay < 1 else None
+        # scheduler = ReduceLROnPlateau(optimizer, 'min', factor=config.decay_rate) if config.decay_rate < 1 else None
         # milestones = list(range(config.decay_start, config.epochs))
         # scheduler = MultiStepLR(optimizer, milestones, gamma=config.decay_rate) if config.decay_rate < 1 else None
         # scheduler = ReduceLROnPlateau(optimizer, 'min', patience=1, verbose=True)
