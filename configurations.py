@@ -45,7 +45,7 @@ class ConfigRotowire(object):
         self.rcdsize = 64
         self.hasize = 64
         self.hdsize = 512
-        self.attn_size = 256
+        self.attn_size = 0
         self.pemsize = 5
         self.nlayers = 1
         self.lr = 0.0002
