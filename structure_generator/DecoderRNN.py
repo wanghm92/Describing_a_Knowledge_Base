@@ -758,13 +758,15 @@ class DecoderRNN(BaseRNN):
                 # print('enc_input_vals: {}'.format(enc_input_vals.size()))
                 # print('enc_field_vals: {}'.format(enc_field_vals.size()))
                 # print('symbols_or_positions: {}'.format(symbols_or_positions.size()))
-                dec_word_input = enc_input_vals.gather(1, symbols_or_positions.unsqueeze(-1).expand(-1, -1, enc_input_vals.size(-1)))
-                dec_field_input = enc_field_vals.gather(1, symbols_or_positions.unsqueeze(-1).expand(-1, -1, enc_field_vals.size(-1)))
+                word_indices = symbols_or_positions.unsqueeze(-1).expand(batch_size, 1, enc_input_vals.size(-1))
+                # print('indices: {}'.format(indices.size()))
+                dec_word_input = enc_input_vals.gather(1, word_indices)
                 # print('dec_word_input: {}'.format(dec_word_input.size()))
+                feat_indices = symbols_or_positions.unsqueeze(-1).expand(batch_size, 1, enc_field_vals.size(-1))
+                dec_field_input = enc_field_vals.gather(1, feat_indices)
                 # print('dec_field_input: {}'.format(dec_field_input.size()))
                 decoder_input = torch.cat((dec_word_input, dec_field_input), dim=2)
                 decoder_input = self.dropout(self.input_mlp(decoder_input))
-
             else:
                 locations = None
                 decoder_input = self.embedding(symbols)
@@ -775,19 +777,18 @@ class DecoderRNN(BaseRNN):
                 coverage = coverage + attn_weights
 
             # record eval loss
-            target_mask_step = symbols.ne(self.eos_id).detach()
+            target_mask_step = symbols.ne(self.eos_id).squeeze(1).detach()
             probs = probs.add_(sys.float_info.epsilon)
             logits = probs.log()
             nll = logits.mul(-1)
-            batch_loss = nll * target_mask_step.float()
+            batch_loss = torch.masked_select(nll.squeeze(1), target_mask_step)
             losses.append(batch_loss.mean().item())
-
             if self.decoder_type == 'pg':
                 p_gens.append(p_gen)
                 src_probs.append(src_prob)
 
             # check if all samples finished at the eos token
-            finished_step = np.logical_not(np.array(target_mask_step.view(-1), dtype=bool))
+            finished_step = np.logical_not(np.array(target_mask_step, dtype=bool))
             finished = np.logical_or(finished, finished_step)
             # stop if all finished
             if all(finished): break
