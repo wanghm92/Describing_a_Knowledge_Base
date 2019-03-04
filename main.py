@@ -257,7 +257,7 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
         # --------------------------------- Metrics on Valid set ----------------------------------- #
         # ------------------------------------------------------------------------------------------ #
         valid_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch,
-                                               cands_ids=cands_ids_original, dataset=v_dataset)
+                                               cands_ids=cands_ids_original, dataset=v_dataset, tgts_ids=tgts_ids)
         metrics.run_logger(writer=writer, epoch=epoch)
 
         # ------------------------------------------------------------------------------------------ #
@@ -270,7 +270,7 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
         if train_cands_ids is not None:
             train_cands_ids_original = [train_cands_ids[i+1] for i in t4e_dataset.sort_indices]
         _ = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch,
-                                    cands_ids=train_cands_ids_original, dataset=t4e_dataset)
+                                    cands_ids=train_cands_ids_original, dataset=t4e_dataset, tgts_ids=tgts_ids)
         metrics.run_logger(writer=writer, epoch=epoch, cat='train_metrics')
 
         # ------------------------------------------------------------------------------------------ #
@@ -521,7 +521,7 @@ if __name__ == "__main__":
                 print('\ncands_ids[1]: {}'.format(cands_ids[1]))
 
         final_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=load_epoch,
-                                               cands_ids=cands_ids, dataset=dataset)
+                                               cands_ids=cands_ids, dataset=dataset, tgts_ids=tgts_ids)
 
     # --------------------------------------------------------------------------------------- #
     # ----------------------------------- evaluation ---------------------------------------- #
@@ -610,4 +610,4 @@ if __name__ == "__main__":
                 fout.write("{}\n".format(feats['fields'][f+1]))
 
         final_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=load_epoch,
-                                               cands_ids=cands_ids_original, dataset=dataset)
+                                               cands_ids=cands_ids_original, dataset=dataset, tgts_ids=tgts_ids)

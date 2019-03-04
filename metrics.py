@@ -2,6 +2,7 @@ import pickle
 import os
 import collections
 import sys
+import time
 from pyxdameraulevenshtein import normalized_damerau_levenshtein_distance
 from utils.content_metrics import Content_Metrics
 sys.path.append('pycocoevalcap')
@@ -37,6 +38,7 @@ class Metrics(object):
     def compute_metrics(self, get_scores=True, live=False, **kwargs):
         pred = kwargs.pop('cands_ids', {})
         dataset = kwargs.pop('dataset', {})
+        gold = kwargs.pop('tgts_ids', {})
         if live:
             temp_ref = kwargs.pop('ref', {})
             cand = kwargs.pop('cand', {})
@@ -60,7 +62,22 @@ class Metrics(object):
 
         print("Computing Scores ...")
         self.score(ref, hypo)
+
+        # start_time = time.time()
         precision, recall, f1, ndld = self.content_metrics(pred, dataset)
+        # end_time = time.time()
+        # print('\nTime used: {:.3f}'.format(end_time-start_time))
+        # print('[epoch-{}]precision:\t{}'.format(epoch, precision))
+        # print('[epoch-{}]recall:\t{}'.format(epoch, recall))
+        # print('[epoch-{}]f1:\t{}'.format(epoch, f1))
+        # print('[epoch-{}]ndld:\t{}'.format(epoch, ndld))
+
+        # TODO: used for training
+        # start_time = time.time()
+        precision, recall, f1, ndld = self.non_rg_metrics(pred, gold)
+        # end_time = time.time()
+        # print('\nTime used: {:.3f}'.format(end_time-start_time))
+
         self.final_scores['precision'] = 100.0*precision
         self.final_scores['recall'] = 100.0*recall
         self.final_scores['f1'] = 100.0*f1
@@ -72,11 +89,56 @@ class Metrics(object):
         if get_scores:
             return self.final_scores
 
-    def remove_dups(self, ids, tks):
-        seq = [x for x,y in zip(ids, tks[0].split()) if y.isdigit()]
+    def remove_dups(self, seq):
+        # TODO: separate digits and tokens
+        # seq = [x for x,y in zip(ids, tks[0].split()) if y.isdigit()]
         seen = set()
         seen_add = seen.add
         return [x for x in seq if not (x in seen or seen_add(x))]
+
+    def non_rg_metrics(self, pred, gold):
+        """ more efficient version """
+        print("\nComputing F1 ...")
+        try:
+            assert len(pred) == len(gold)
+        except AssertionError:
+            raise ValueError("len(pred) = {}; len(gold) = {}".format(len(pred), len(gold)))
+
+        print("{} pairs to be evaluated".format(len(pred)))
+
+        true_positives, predicted, total_gold = 0, 0, 0
+        ndld = 0.0
+
+        for i in range(1, len(pred)+1):
+            ascii_start = 1
+            p = self.remove_dups(pred[i-1])
+            g = self.remove_dups(gold[i])
+            s1 = ''.join([chr(ascii_start + idx) for idx in range(len(p))])
+            pred_dict = {n: s for n,s in zip(p, s1)}
+            s2 = ''
+            next_char = ascii_start + len(s1)
+
+            for x in g:
+                if x in pred_dict:
+                    s2 += pred_dict[x]
+                else:
+                    s2 += chr(next_char)
+                    next_char += 1
+
+            gold_dict = dict.fromkeys(g)
+            tp = [1 if x in gold_dict else 0 for x in p]
+            tp = sum(tp)
+            true_positives += tp
+            predicted += len(p)
+            total_gold += len(g)
+            ndld += 1 - normalized_damerau_levenshtein_distance(s1, s2)
+
+        precision = float(true_positives) / predicted
+        recall = float(true_positives) / total_gold
+        f1 = 2*precision*recall/(precision+recall)
+        ndld /= len(pred)
+
+        return precision, recall, f1, ndld
 
     def run_logger(self, writer, epoch, cat='valid_metrics'):
         rouge_l = self.final_scores['ROUGE_L']
