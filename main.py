@@ -180,7 +180,10 @@ def train_batch(dataset, batch_idx, model, teacher_forcing_ratio):
     return batch_loss.item(), len(source_len), total_norm
 
 def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epoch=0):
-    """ Train epochs, evaluate and inference on valid set"""
+    """
+    Train epochs, evaluate and inference on valid set
+    Evaluation starts from epoch 0: random initialization
+    """
     t_dataset, t4e_dataset = trainsets
     best_dev_bleu = 0.0
     best_dev_rouge = 0.0
@@ -190,9 +193,10 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
     save_prefix = '.'.join(args.save.split('.')[:-1]) if args.mode == 4 else args.save
     L.info("Model saving prefix is: {}".format(save_prefix))
 
-    for epoch in range(load_epoch, n_epochs + load_epoch):
+    epoch = load_epoch
+    while True:
         # ------------------------------------------------------------------------------------------ #
-        # --------------------------------------- validation --------------------------------------- #
+        # ----------------------------------- Eval on Valid set ------------------------------------ #
         # ------------------------------------------------------------------------------------------ #
         L.info("Validation Epoch - {}".format(epoch))
         valid_f = Validator(model=model, v_dataset=v_dataset, use_cuda=args.cuda, tfr=teacher_forcing_ratio)
@@ -200,18 +204,18 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
         writer.add_scalar('loss/valid_loss', valid_loss, epoch)
 
         # ------------------------------------------------------------------------------------------ #
-        # --------------------------------------- inference ---------------------------------------- #
+        # --------------------------------- Inference on Valid set --------------------------------- #
         # ------------------------------------------------------------------------------------------ #
         L.info("Inference Epoch - {}".format(epoch))
         predictor = Predictor(model, v_dataset.vocab, args.cuda,
                               decoder_type=args.dec_type, unk_gen=config.unk_gen, dataset_type=args.type)
-        cand, ref, pred_loss, others = predictor.preeval_batch(v_dataset)
+        cand, ref, perplexity, others = predictor.preeval_batch(v_dataset)
         cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats = others
-        writer.add_scalar('loss/perplexity', pred_loss, epoch)
+        writer.add_scalar('perplexity/valid', perplexity, epoch)
 
         L.info('Result:')
         L.info('valid_loss: {}'.format(valid_loss))
-        L.info('pred_loss: {}'.format(pred_loss))
+        L.info('perplexity: {}'.format(perplexity))
         if args.verbose:
             L.info('\nsource[1]: {}'.format(srcs[1]))
             for k, v in feats.items():
@@ -249,17 +253,18 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
                     fout.write("{}\n".format(" ".join([str(x) for x in cands_ids_original[c]])))
 
         # ------------------------------------------------------------------------------------------ #
-        # ---------------------------------------- Metrics ----------------------------------------- #
+        # --------------------------------- Metrics on Valid set ----------------------------------- #
         # ------------------------------------------------------------------------------------------ #
         valid_scores = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch,
                                                cands_ids=cands_ids_original, dataset=v_dataset)
         metrics.run_logger(writer=writer, epoch=epoch)
 
         # ------------------------------------------------------------------------------------------ #
-        # ----------------------------------- Eval on Training set --------------------------------- #
+        # ---------------------------- Eval and Metrics on Training set ---------------------------- #
         # ------------------------------------------------------------------------------------------ #
-        cand, ref, pred_loss, others = predictor.preeval_batch(t4e_dataset)
+        cand, ref, perplexity, others = predictor.preeval_batch(t4e_dataset)
         _, _, train_cands_ids, _, _, _ = others
+        writer.add_scalar('perplexity/train', perplexity, epoch)
         if train_cands_ids is not None:
             train_cands_ids_original = [train_cands_ids[i+1] for i in t4e_dataset.sort_indices]
         _ = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch,
@@ -290,6 +295,10 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
         # ------------------------------------------------------------------------------------------ #
         # --------------------------------------- train -------------------------------------------- #
         # ------------------------------------------------------------------------------------------ #
+        epoch += 1
+        if epoch > n_epochs + load_epoch:
+            break
+
         L.info("Training Epoch - {}".format(epoch))
         L.info("{} batches to be trained".format(len_batch))
 
@@ -315,7 +324,7 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
 
         epoch_loss /= epoch_examples_total
         L.info("Finished epoch %d with average loss: %.4f" % (epoch, epoch_loss))
-        writer.add_scalar('loss/epoch_loss', epoch_loss, epoch)
+        writer.add_scalar('loss/train_loss', epoch_loss, epoch)
         if scheduler is not None:
             if isinstance(scheduler, ReduceLROnPlateau):
                 scheduler.step(valid_loss)
@@ -491,11 +500,11 @@ if __name__ == "__main__":
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
-        cand, ref, pred_loss, others = predictor.preeval_batch(dataset)
+        cand, ref, perplexity, others = predictor.preeval_batch(dataset)
         cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats = others
 
         L.info('Result:')
-        L.info('pred_loss: {}'.format(pred_loss))
+        L.info('perplexity: {}'.format(perplexity))
         if args.verbose:
             print('\nref[1]: {}'.format(ref[1][0]))
             print('\ncand[1]: {}'.format(cand[1]))
@@ -529,11 +538,11 @@ if __name__ == "__main__":
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
-        cand, ref, pred_loss, others = predictor.preeval_batch(dataset, fig=args.fig, save_dir=save_file_dir)
+        cand, ref, perplexity, others = predictor.preeval_batch(dataset, fig=args.fig, save_dir=save_file_dir)
         cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats = others
 
         L.info('Result:')
-        L.info('pred_loss: {}'.format(pred_loss))
+        L.info('perplexity: {}'.format(perplexity))
         print('\nsource[1]: {}'.format(srcs[1]))
         if args.verbose:
             for k, v in feats.items():

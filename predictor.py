@@ -51,6 +51,7 @@ class Predictor(object):
         i = 0
         pred_loss = 0
         figs_per_batch = 1
+        token_count = 0
         total_batches = len(dataset.corpus)
 
         print("{} batches to be evaluated".format(total_batches))
@@ -62,7 +63,8 @@ class Predictor(object):
             everything = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
                                     w2fs=w2fs, input_lengths=source_len, max_source_oov=max_source_oov, fig=True)
             decouts, locations, lens, losses, p_gens, selfatt, attns = everything
-            pred_loss += sum(losses)/len(losses)
+            token_count += sum(lens)
+            pred_loss += sum(losses)
 
             for j in range(len(lens)):
                 i += 1
@@ -116,7 +118,7 @@ class Predictor(object):
 
         others = (cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats)
 
-        return cands, refs, pred_loss/total_batches, others
+        return cands, refs, pred_loss/token_count, others
 
     def post_process(self, sentence, sentence_unk, pgen=None):
         try:

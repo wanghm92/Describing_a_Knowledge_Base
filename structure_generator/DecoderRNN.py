@@ -782,7 +782,7 @@ class DecoderRNN(BaseRNN):
             logits = probs.log()
             nll = logits.mul(-1)
             batch_loss = torch.masked_select(nll.squeeze(1), target_mask_step)
-            losses.append(batch_loss.mean().item())
+            losses.append(batch_loss)
             if self.decoder_type == 'pg':
                 p_gens.append(p_gen)
                 src_probs.append(src_prob)
@@ -797,12 +797,13 @@ class DecoderRNN(BaseRNN):
             p_gens = torch.stack(p_gens, 1).squeeze(2)
 
         locations = torch.stack(locations, 1).squeeze(2) if locations is not None else None
+        losses = torch.cat(losses)
         if fig:
             self_matrix = f_matrix if self.field_self_att else None
-            return torch.stack(decoded_outputs, 1).squeeze(2), locations, lengths.tolist(), losses, p_gens, \
+            return torch.stack(decoded_outputs, 1).squeeze(2), locations, lengths.tolist(), losses.tolist(), p_gens, \
                    self_matrix, torch.stack(attn, 1).squeeze(2)
         else:
-            return torch.stack(decoded_outputs, 1).squeeze(2), locations, lengths.tolist(), losses, p_gens
+            return torch.stack(decoded_outputs, 1).squeeze(2), locations, lengths.tolist(), losses.tolist(), p_gens
 
     def _init_state(self, enc_state):
         """ Initialize the encoder hidden state. """
