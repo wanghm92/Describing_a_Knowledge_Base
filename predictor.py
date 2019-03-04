@@ -59,7 +59,6 @@ class Predictor(object):
             batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_t, batch_o_t, source_len, max_source_oov, \
             w2fs, sources, targets, fields, list_oovs = dataset.get_batch(batch_idx)
             lab_t = batch_t[-1]
-            batch_t = batch_t[0]
 
             everything = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
                                     w2fs=w2fs, input_lengths=source_len, max_source_oov=max_source_oov, fig=True)
@@ -82,7 +81,6 @@ class Predictor(object):
                     out_seq_ids = locations[j].tolist()
                     out_seq_ids = out_seq_ids[:lens[j]-1]
                     cands_ids[i] = out_seq_ids
-                    # tgt_seq_ids = [(x,y) for x,y in zip(batch_t[j].tolist(), targets[j]) if x > 3]
                     tgt_seq_ids = [x for x in lab_t[j].tolist() if x > 3]
                     tgts_ids[i] = tgt_seq_ids
 

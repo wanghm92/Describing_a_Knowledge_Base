@@ -14,6 +14,7 @@ class DecoderRNN(BaseRNN):
                  sos_id=3, eos_id=2, unk_id=1,
                  rnn_cell='gru', directions=2,
                  attn_src='emb', attn_type='concat', attn_fuse='sum', attn_level=2,
+                 pt_dec_feat=False,
                  use_cov_loss=True, use_cov_attn=True, cov_in_pgen=False,
                  field_self_att=False, field_concat_pos=False, field_context=False, context_mlp=False,
                  mask=False, use_cuda=True, unk_gen=False,
@@ -46,6 +47,7 @@ class DecoderRNN(BaseRNN):
         self.embedding = embedding
         self.field_embedding = field_embedding
         self.dataset_type = dataset_type
+        self.pt_dec_feat = pt_dec_feat
         if self.dataset_type == 3:
             self.pos_embedding, self.rpos_embedding = pos_embedding
         else:
@@ -171,8 +173,10 @@ class DecoderRNN(BaseRNN):
         # ----------------- params for rnn cell ----------------- #
         if self.decoder_type == 'pt':
             self.input_size = embed_size + fdsize + posit_size
-            self.input_mlp = nn.Sequential(nn.Linear(self.input_size, embed_size), nn.ReLU())
-            self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers,
+            if self.pt_dec_feat:
+                self.input_mlp = nn.Sequential(nn.Linear(self.input_size, embed_size), nn.ReLU())
+            # TODO: here input size is set to hidden size, create a flag here
+            self.rnn = self.rnn_cell(hidden_size, hidden_size, n_layers,
                                      batch_first=True, dropout=self.dropout_p)
         else:
             self.rnn = self.rnn_cell(embed_size, hidden_size, n_layers,
@@ -320,7 +324,7 @@ class DecoderRNN(BaseRNN):
 
         return logit_or_score, logit_or_score, logit_or_score
 
-    def _normalize(self, t, mask):
+    def _normalize(self, t):
         # t.masked_fill_(mask.data.byte(), sys.float_info.epsilon)  # mask to epsilon before normalization
         normalizer = t.sum(dim=-1, keepdim=True).add_(sys.float_info.epsilon)
         return torch.div(t, normalizer)
@@ -579,17 +583,31 @@ class DecoderRNN(BaseRNN):
             lm_loss, cov_loss = [], []
             dec_lens = (targets > 0).float().sum(1)
 
-            embedded = self.embedding(targets)
             if self.decoder_type == 'pt':
-                embed_field = self.field_embedding(f_t)
-                embed_pf = self.pos_embedding(pf_t)
-                embed_pb = self.rpos_embedding(pb_t)
-                embed_pos = torch.cat((embed_pf, embed_pb), dim=2)
-                embed_field_pos = torch.cat((embed_field, embed_pos), dim=2)
-                embedded = torch.cat((embedded, embed_field_pos), dim=2)
-                # embedded = torch.cat((embedded, embed_field), dim=2)
+                # print('targets: {}'.format(targets.size()))
+                # print('enc_hidden: {}'.format(enc_hidden.size()))
+                # print('lab_t: {}'.format(lab_t.size()))
+                # print('lab_t: {}'.format(lab_t))
 
-            decoder_inputs = self.dropout(self.input_mlp(embedded))
+                tgt_indices = lab_t.unsqueeze(-1).expand(batch_size, targets.size(1), enc_hidden.size(-1))
+                embedded = enc_hidden.gather(1, tgt_indices)
+
+                # embedded = self.embedding(targets)
+                # embed_field = self.field_embedding(f_t)
+                # embed_pf = self.pos_embedding(pf_t)
+                # embed_pb = self.rpos_embedding(pb_t)
+                # embed_pos = torch.cat((embed_pf, embed_pb), dim=2)
+                # embed_field_pos = torch.cat((embed_field, embed_pos), dim=2)
+                # embedded = torch.cat((embedded, embed_field_pos), dim=2)
+                # # embedded = torch.cat((embedded, embed_field), dim=2)
+                # if self.pt_dec_feat:
+                #     embedded = self.input_mlp(embedded)
+
+            else:
+                embedded = self.embedding(targets)
+
+            # print('embedded: {}'.format(embedded.size()))
+            decoder_inputs = embedded
 
             hidden, _ = self.rnn(decoder_inputs, decoder_hidden_init)
 
@@ -674,20 +692,26 @@ class DecoderRNN(BaseRNN):
             attn = []
 
         if self.decoder_type == 'pt':
-            # targets, f_t, pf_t, pb_t, lab_t = targets
-            targets, f_t, pf_t, pb_t = targets
-            embedded = self.embedding(targets)
-            embed_field = self.field_embedding(f_t)
-            embed_pf = self.pos_embedding(pf_t)
-            embed_pb = self.rpos_embedding(pb_t)
-            embed_pos = torch.cat((embed_pf, embed_pb), dim=2)
-            embed_field_pos = torch.cat((embed_field, embed_pos), dim=2)
-            embedded = torch.cat((embedded, embed_field_pos), dim=2)
-            # embedded = torch.cat((embedded, embed_field), dim=2)
+
+            tgt_indices = targets.unsqueeze(-1).expand(batch_size, 1, enc_hidden_vals.size(-1))
+            embedded = enc_hidden_vals.gather(1, tgt_indices)
+
+            # # targets, f_t, pf_t, pb_t, lab_t = targets
+            # targets, f_t, pf_t, pb_t = targets
+            # embedded = self.embedding(targets)
+            # embed_field = self.field_embedding(f_t)
+            # embed_pf = self.pos_embedding(pf_t)
+            # embed_pb = self.rpos_embedding(pb_t)
+            # embed_pos = torch.cat((embed_pf, embed_pb), dim=2)
+            # embed_field_pos = torch.cat((embed_field, embed_pos), dim=2)
+            # embedded = torch.cat((embedded, embed_field_pos), dim=2)
+            # # embedded = torch.cat((embedded, embed_field), dim=2)
         else:
             embedded = self.embedding(targets)
 
-        decoder_input = self.dropout(self.input_mlp(embedded))
+        # TODO: use memory_bank or use the same linear layer from encoder
+        decoder_input = embedded
+        # decoder_input = self.dropout(self.input_mlp(embedded))
         # weighted_coverage = coverage.clone()
         # step through decoder hidden states
         for step in range(max_length):
@@ -755,18 +779,22 @@ class DecoderRNN(BaseRNN):
             # symbols.masked_fill_((symbols > self.vocab_size-1), self.unk_id)
             if self.decoder_type == 'pt':
                 locations.append(positions.clone())
+                word_indices = symbols_or_positions.unsqueeze(-1).expand(batch_size, 1, enc_hidden_vals.size(-1))
+                decoder_input = enc_hidden_vals.gather(1, word_indices)
+
+                # word_indices = symbols_or_positions.unsqueeze(-1).expand(batch_size, 1, enc_input_vals.size(-1))
+                # dec_word_input = enc_input_vals.gather(1, word_indices)
+                # feat_indices = symbols_or_positions.unsqueeze(-1).expand(batch_size, 1, enc_field_vals.size(-1))
+                # dec_field_input = enc_field_vals.gather(1, feat_indices)
+                # decoder_input = torch.cat((dec_word_input, dec_field_input), dim=2)
+                # decoder_input = self.dropout(self.input_mlp(decoder_input))
+
                 # print('enc_input_vals: {}'.format(enc_input_vals.size()))
                 # print('enc_field_vals: {}'.format(enc_field_vals.size()))
                 # print('symbols_or_positions: {}'.format(symbols_or_positions.size()))
-                word_indices = symbols_or_positions.unsqueeze(-1).expand(batch_size, 1, enc_input_vals.size(-1))
                 # print('indices: {}'.format(indices.size()))
-                dec_word_input = enc_input_vals.gather(1, word_indices)
                 # print('dec_word_input: {}'.format(dec_word_input.size()))
-                feat_indices = symbols_or_positions.unsqueeze(-1).expand(batch_size, 1, enc_field_vals.size(-1))
-                dec_field_input = enc_field_vals.gather(1, feat_indices)
                 # print('dec_field_input: {}'.format(dec_field_input.size()))
-                decoder_input = torch.cat((dec_word_input, dec_field_input), dim=2)
-                decoder_input = self.dropout(self.input_mlp(decoder_input))
             else:
                 locations = None
                 decoder_input = self.embedding(symbols)
@@ -848,18 +876,21 @@ class DecoderRNN(BaseRNN):
             if teacher_forcing_ratio > 0:
                 raise ValueError("Teacher forcing has to be disabled (set 0) when no targets is provided.")
             # torch.set_grad_enabled(False)
-            targets = torch.LongTensor([self.sos_id] * batch_size).view(batch_size, 1)
+            # targets = torch.LongTensor([self.sos_id] * batch_size).view(batch_size, 1)
+            if self.decoder_type == 'pt':
+                targets = torch.LongTensor([0] * batch_size).view(batch_size, 1)
+                # fields = torch.LongTensor([self.sos_id] * batch_size).view(batch_size, 1)
+                # pos = torch.LongTensor([self.sos_id] * batch_size).view(batch_size, 1)
+                # rpos = torch.LongTensor([self.sos_id] * batch_size).view(batch_size, 1)
+                # if self.use_cuda:
+                #     fields = fields.cuda()
+                #     pos = pos.cuda()
+                #     rpos = rpos.cuda()
+                # targets = (targets, fields, pos, rpos)
+            else:
+                targets = torch.LongTensor([self.sos_id] * batch_size).view(batch_size, 1)
             if self.use_cuda:
                 targets = targets.cuda()
-            if self.decoder_type == 'pt':
-                fields = torch.LongTensor([self.sos_id] * batch_size).view(batch_size, 1)
-                pos = torch.LongTensor([self.sos_id] * batch_size).view(batch_size, 1)
-                rpos = torch.LongTensor([self.sos_id] * batch_size).view(batch_size, 1)
-                if self.use_cuda:
-                    fields = fields.cuda()
-                    pos = pos.cuda()
-                    rpos = rpos.cuda()
-                targets = (targets, fields, pos, rpos)
             max_length = self.max_length
         else:
             max_length = targets.size(1) - 1     # minus the start of sequence symbol

@@ -161,9 +161,10 @@ class Vocabulary:
         self.ha2idx['AWAY'] = 5
         self.idx2ha = {idx: h for h, idx in self.ha2idx.items()}
 
-    def add_start_end(self, vector):
-        vector.append(self.word2idx['<EOS>'])
-        return [self.word2idx['<SOS>']] + vector
+    def add_start_end(self, vector, item2idx=None):
+        """ prepend <SOS> and append <EOS> for sequences"""
+        vector.append(item2idx['<EOS>'])
+        return [item2idx['<SOS>']] + vector
 
     def vectorize_feature(self, vector, ft_type='field', is_target=False):
 
@@ -178,10 +179,11 @@ class Vocabulary:
 
         _ft = [ft2idx.get(x, ft2idx['<UNK>']) for x in vector]
         if self.dec_type == 'pt':
-            # add <EOS> word for ptr-net to choose from
-            _ft.append(ft2idx['<EOS>'])
-            if is_target:
-                _ft = [ft2idx['<SOS>']] + _ft
+            # add <SOS> at the beginning and <EOS> to the end for ptr-net to choose from
+            # _ft.append(ft2idx['<EOS>'])
+            _ft = self.add_start_end(_ft, item2idx=ft2idx)
+            # if is_target:
+            #     _ft = [ft2idx['<SOS>']] + _ft
         return _ft
 
     def vectorize_source(self, vector, table):
@@ -209,10 +211,12 @@ class Vocabulary:
                 # use field type embedding for OOV values
                 # _source.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
 
-        # add <EOS> word for ptr-net to choose from
+        # add <SOS> at the beginning and <EOS> to the end for ptr-net to choose from
         if self.dec_type == 'pt':
-            _o_source.append(self.word2idx['<EOS>'])
-            _source.append(self.word2idx['<EOS>'])
+            # _o_source.append(self.word2idx['<EOS>'])
+            # _source.append(self.word2idx['<EOS>'])
+            _o_source = self.add_start_end(_o_source, item2idx=self.word2idx)
+            _source = self.add_start_end(_source, item2idx=self.word2idx)
         return _o_source, source_oov, _source, oov_freq
 
     def vectorize_target(self, vector, source_oov, table):
@@ -227,7 +231,7 @@ class Vocabulary:
                 oov_freq += 1
                 _o_target.append(self.word2idx['<UNK>'])
                 _target.append(self.word2idx['<UNK>'])
-        return self.add_start_end(_o_target), self.add_start_end(_target), oov_freq
+        return self.add_start_end(_o_target, self.word2idx), self.add_start_end(_target, self.word2idx), oov_freq
 
 
 class Table2text_seq:
@@ -310,7 +314,7 @@ class Table2text_seq:
             content_plan = pred_ids[i]
             eval_output = []
             for record in content_plan:
-                elements = sample[int(record)].split(DELIM)
+                elements = sample[int(record-1)].split(DELIM)
                 if elements[0].isdigit():
                     record_type = elements[2]
                     if not elements[2].startswith('TEAM'):
@@ -404,7 +408,7 @@ class Table2text_seq:
                 field_t.append(tag)
                 rcd_t.append(rcd)
                 ha_t.append(ha)
-                lab_t.append(lab)  # int
+                lab_t.append(lab+1)  # int
 
             # print("value_s: \n{}".format(value_s))
             # print("field_s: \n{}".format(field_s))
@@ -515,7 +519,7 @@ class Table2text_seq:
             src_len = len(source)
             if self.dec_type == 'pt':
                 value_t, field_t, rcd_t, ha_t, lab_t = target  #tokens
-                src_len += 1  # <EOS>
+                src_len += 2  # <EOS> and <SOS>
                 tgt_len = len(value_t) + 2   # <EOS> and <SOS>
             else:
                 tgt_len = len(target) + 2
@@ -536,6 +540,7 @@ class Table2text_seq:
                 _fields_t = self.vocab.vectorize_feature(field_t, ft_type='field', is_target=True)
                 _rcd_t = self.vocab.vectorize_feature(rcd_t, ft_type='rcd', is_target=True)
                 _ha_t = self.vocab.vectorize_feature(ha_t, ft_type='ha', is_target=True)
+                lab_t = [0] + lab_t
                 lab_t.append(src_len-1)
             else:
                 _o_target, _target, oov_freq_tgt = self.vocab.vectorize_target(target, source_oov, table)
@@ -584,7 +589,7 @@ class Table2text_seq:
             batch_pb.append(_ha)
             batch_o_s.append(_o_source)
 
-            assert len(_target) == len(_fields_t) == len(_rcd_t) == len(_ha_t) == len(lab_t)+1 == len(_o_target) == tgt_len
+            assert len(_target) == len(_fields_t) == len(_rcd_t) == len(_ha_t) == len(lab_t) == len(_o_target) == tgt_len
             batch_t.append(_target)
             batch_o_t.append(_o_target)
             if self.dec_type == 'pt':
