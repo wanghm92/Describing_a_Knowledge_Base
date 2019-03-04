@@ -211,7 +211,8 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
                               decoder_type=args.dec_type, unk_gen=config.unk_gen, dataset_type=args.type)
         cand, ref, perplexity, others = predictor.preeval_batch(v_dataset)
         cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats = others
-        writer.add_scalar('perplexity/valid', perplexity, epoch)
+        if epoch > 0:
+            writer.add_scalar('perplexity/valid', perplexity, epoch)
 
         L.info('Result:')
         L.info('valid_loss: {}'.format(valid_loss))
@@ -264,7 +265,8 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
         # ------------------------------------------------------------------------------------------ #
         cand, ref, perplexity, others = predictor.preeval_batch(t4e_dataset)
         _, _, train_cands_ids, _, _, _ = others
-        writer.add_scalar('perplexity/train', perplexity, epoch)
+        if epoch > 0:
+            writer.add_scalar('perplexity/train', perplexity, epoch)
         if train_cands_ids is not None:
             train_cands_ids_original = [train_cands_ids[i+1] for i in t4e_dataset.sort_indices]
         _ = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch,

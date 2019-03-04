@@ -1,5 +1,5 @@
 import torch
-import sys, os
+import sys, os, math
 import matplotlib.pyplot as plt
 plt.switch_backend('Agg')  #TkAgg
 import matplotlib.ticker as ticker
@@ -118,7 +118,7 @@ class Predictor(object):
 
         others = (cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats)
 
-        return cands, refs, pred_loss/token_count, others
+        return cands, refs, math.exp(pred_loss/token_count), others
 
     def post_process(self, sentence, sentence_unk, pgen=None):
         try:
