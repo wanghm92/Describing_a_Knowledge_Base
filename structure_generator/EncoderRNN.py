@@ -6,7 +6,7 @@ from .baseRNN import BaseRNN
 
 class EncoderRNN(BaseRNN):
     def __init__(self, vocab_size=0, embedding=None,
-                 hidden_size=0, posit_size=0, embed_size=0, fdsize=0, dec_size=0, attn_hidden=64,
+                 hidden_size=0, posit_size=0, embed_size=0, fdsize=0, dec_size=0, attn_size=0,
                  attn_src='emb', dropout_p=0, n_layers=1, rnn_cell='gru', directions=2,
                  variable_lengths=True, field_concat_pos=False,
                  field_embedding=None, pos_embedding=None, dataset_type=0, enc_type='rnn'):
@@ -26,13 +26,14 @@ class EncoderRNN(BaseRNN):
         self.dataset_type = dataset_type
         self.enc_type = enc_type
         self.dec_size = dec_size
-        self.attn_hidden = attn_hidden
+        self.attn_size = attn_size
         self.input_size = self.embed_size + self.fdsize + self.posit_size
 
         if self.enc_type == 'fc':
             self.fc = nn.Sequential(nn.Linear(self.input_size, self.dec_size), nn.ReLU())
-            self.attn_query = nn.Sequential(nn.Linear(self.dec_size, self.attn_hidden), nn.ELU(0.1))
-            self.attn_linear = nn.Linear(self.attn_hidden, self.attn_hidden, bias=False)
+            if self.attn_size > 0:
+                self.attn_query = nn.Sequential(nn.Linear(self.dec_size, self.attn_size), nn.ELU(0.1))
+                self.attn_linear = nn.Linear(self.attn_size, self.attn_size, bias=False)
             self.linear_out = nn.Linear(self.dec_size*2, self.dec_size, bias=False)
             self.softmax = nn.Softmax(dim=2)
         elif self.enc_type == 'rnn':
@@ -88,12 +89,17 @@ class EncoderRNN(BaseRNN):
 
             r = self.fc(embedded)
             r = self.dropout(r)
-            r_query = self.attn_query(r)
+            if self.attn_size > 0:
+                r_query = self.attn_query(r)
+                r_key = self.attn_linear(r_query)
+            else:
+                r_query = r
+                r_key = r
             # print('r_query: {}'.format(r_query.size()))
+            # print('r_key: {}'.format(r_key.size()))
+
             r_query_t = r_query.transpose(1, 2)
             # print('r_query_t: {}'.format(r_query_t.size()))
-            r_key = self.attn_linear(r_query)
-            # print('r_key: {}'.format(r_key.size()))
 
             # (batch, t_len, d) x (batch, d, s_len) --> (batch, t_len, s_len)
             align = torch.bmm(r_key, r_query_t)

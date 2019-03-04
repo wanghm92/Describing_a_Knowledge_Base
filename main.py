@@ -84,7 +84,7 @@ parser.add_argument('--fig', action='store_true',
                     help='generate attention visualization figures for evaluation')
 parser.add_argument('--verbose', action='store_true',
                     help='print sample outputs')
-parser.add_argument('--xavier', action='store_true',
+parser.add_argument('--xavier', action='store_false',
                     help='xavier initialization')
 
 args = parser.parse_args()
@@ -190,7 +190,7 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
     save_prefix = '.'.join(args.save.split('.')[:-1]) if args.mode == 4 else args.save
     L.info("Model saving prefix is: {}".format(save_prefix))
 
-    for epoch in range(load_epoch + 1, n_epochs + load_epoch + 1):
+    for epoch in range(load_epoch, n_epochs + load_epoch):
         # ------------------------------------------------------------------------------------------ #
         # --------------------------------------- validation --------------------------------------- #
         # ------------------------------------------------------------------------------------------ #
@@ -207,7 +207,7 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
                               decoder_type=args.dec_type, unk_gen=config.unk_gen, dataset_type=args.type)
         cand, ref, pred_loss, others = predictor.preeval_batch(v_dataset)
         cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats = others
-        writer.add_scalar('loss/pred_loss', pred_loss, epoch)
+        writer.add_scalar('loss/perplexity', pred_loss, epoch)
 
         L.info('Result:')
         L.info('valid_loss: {}'.format(valid_loss))
@@ -371,8 +371,8 @@ if __name__ == "__main__":
             fd_size = config.emsize
 
     encoder = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding,
-                         embed_size=config.emsize, fdsize=fd_size,
-                         hidden_size=hidden_size, posit_size=posit_size, dec_size=hidden_size,
+                         embed_size=config.emsize, fdsize=fd_size, hidden_size=hidden_size,
+                         posit_size=posit_size, dec_size=hidden_size, attn_size=config.attn_size,
                          attn_src=args.attn_src,
                          dropout_p=config.dropout, n_layers=config.nlayers,
                          rnn_cell=config.cell, directions=config.directions,
@@ -400,6 +400,7 @@ if __name__ == "__main__":
         # milestones = list(range(config.decay_start, config.epochs))
         # scheduler = MultiStepLR(optimizer, milestones, gamma=config.decay_rate) if config.decay_rate < 1 else None
         # scheduler = ReduceLROnPlateau(optimizer, 'min', patience=1, verbose=True)
+        # TODO: use plateau scheduler
         scheduler = ExponentialLR(optimizer, gamma=config.decay_rate) if config.decay_rate < 1 else None
     elif config.optimizer == 'adagrad':
         optimizer = optim.Adagrad(model.parameters(), lr=config.lr, lr_decay=config.decay_rate,
