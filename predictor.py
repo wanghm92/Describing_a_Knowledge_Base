@@ -115,7 +115,8 @@ class Predictor(object):
                     fmatrix = selfatt[j] if selfatt is not None else None
                     self.make_figure(lens[j], out, fmatrix, attns[j], batch_pf[j], sources[j], batch_idx+j, save_dir)
 
-        others = (cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats)
+        avg_len = float(token_count)/dataset.len
+        others = (cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats, avg_len)
 
         return cands, refs, math.exp(pred_loss/token_count), others
 

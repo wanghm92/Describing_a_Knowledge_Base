@@ -34,10 +34,6 @@ parser.add_argument('--cuda', action='store_false',
                     help='use CUDA')
 parser.add_argument('--dec_type', type=str, default='pg', choices=['pg', 'pt', 'seq'],
                     help='decoder model type pg(pointer-generator)/pt(pointer-net)(WIP)/seq(seq2seq)')
-parser.add_argument('--ptr_input', type=str, default='emb', choices=['emb', 'hid'],
-                    help='input to pointer-network emb: normal word+feat/hidden: memory bank hidden vectors')
-parser.add_argument('--dec_feat_merge', type=str, default='mlp', choices=['cat', 'mlp'],
-                    help='merge input embeddings for decoder')
 parser.add_argument('--enc_type', type=str, default='rnn', choices=['rnn', 'fc', 'trans'],
                     help='encoder model type')
 parser.add_argument('--save', type=str, default='params.pkl',
@@ -78,8 +74,12 @@ parser.add_argument('--field_cat_pos', action='store_true',
 parser.add_argument('--field_context', action='store_false',
                     help='whether pass context vector of field embeddings to output layer')
 
-parser.add_argument('--pt_dec_feat', action='store_true',
+parser.add_argument('--ptr_input', type=str, default='emb', choices=['emb', 'hid'],
+                    help='input to pointer-network emb: normal word+feat/hidden: memory bank hidden vectors')
+parser.add_argument('--ptr_dec_feat', action='store_false',
                     help='whether to cat features for ptr-net decoder')
+parser.add_argument('--ptr_feat_merge', type=str, default='mlp', choices=['cat', 'mlp'],
+                    help='merge input embeddings for decoder')
 
 parser.add_argument('--context_mlp', action='store_true',
                     help='MLP layer on context vectors before output layer')
@@ -208,7 +208,6 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
         L.info("Validation Epoch - {}".format(epoch))
         valid_f = Validator(model=model, v_dataset=v_dataset, use_cuda=args.cuda, tfr=teacher_forcing_ratio)
         valid_loss = valid_f.valid()
-        writer.add_scalar('loss/valid_loss', valid_loss, epoch)
 
         # ------------------------------------------------------------------------------------------ #
         # --------------------------------- Inference on Valid set --------------------------------- #
@@ -216,14 +215,16 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
         L.info("Inference Epoch - {}".format(epoch))
         predictor = Predictor(model, v_dataset.vocab, args.cuda,
                               decoder_type=args.dec_type, unk_gen=config.unk_gen, dataset_type=args.type)
-        cand, ref, perplexity, others = predictor.preeval_batch(v_dataset)
-        cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats = others
+        cand, ref, valid_ppl, others = predictor.preeval_batch(v_dataset)
+        cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats, avg_len = others
         if epoch > 0:
-            writer.add_scalar('perplexity/valid', perplexity, epoch)
+            writer.add_scalar('loss/valid', valid_loss, epoch)
+            writer.add_scalar('perplexity/valid', valid_ppl, epoch)
+            writer.add_scalar('output_len/valid', avg_len, epoch)
 
         L.info('Result:')
         L.info('valid_loss: {}'.format(valid_loss))
-        L.info('perplexity: {}'.format(perplexity))
+        L.info('valid_ppl: {}'.format(valid_ppl))
         if args.verbose:
             L.info('\nsource[1]: {}'.format(srcs[1]))
             for k, v in feats.items():
@@ -270,10 +271,11 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
         # ------------------------------------------------------------------------------------------ #
         # ---------------------------- Eval and Metrics on Training set ---------------------------- #
         # ------------------------------------------------------------------------------------------ #
-        cand, ref, perplexity, others = predictor.preeval_batch(t4e_dataset)
-        _, _, train_cands_ids, train_tgts_ids, _, _ = others
+        cand, ref, train_ppl, others = predictor.preeval_batch(t4e_dataset)
+        _, _, train_cands_ids, train_tgts_ids, _, _, train_avg_len = others
         if epoch > 0:
-            writer.add_scalar('perplexity/train', perplexity, epoch)
+            writer.add_scalar('perplexity/train', train_ppl, epoch)
+            writer.add_scalar('output_len/train', train_avg_len, epoch)
         if train_cands_ids is not None:
             train_cands_ids_original = [train_cands_ids[i+1] for i in t4e_dataset.sort_indices]
         _ = metrics.compute_metrics(live=True, cand=cand, ref=ref, epoch=epoch,
@@ -333,10 +335,10 @@ def train(trainsets, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epo
 
         epoch_loss /= epoch_examples_total
         L.info("Finished epoch %d with average loss: %.4f" % (epoch, epoch_loss))
-        writer.add_scalar('loss/train_loss', epoch_loss, epoch)
+        writer.add_scalar('loss/train', epoch_loss, epoch)
         if scheduler is not None:
             if isinstance(scheduler, ReduceLROnPlateau):
-                scheduler.step(valid_loss)
+                scheduler.step(valid_ppl)
             else:
                 scheduler.step()
 
@@ -397,14 +399,14 @@ if __name__ == "__main__":
                          variable_lengths=True, field_cat_pos=args.field_cat_pos,
                          field_embedding=field_embedding, pos_embedding=pos_embedding,
                          dataset_type=args.type, enc_type=args.enc_type)
-    decoder = DecoderRNN(dec_type=args.dec_type, ptr_input=args.ptr_input, dec_feat_merge=args.dec_feat_merge,
+    decoder = DecoderRNN(dec_type=args.dec_type, ptr_input=args.ptr_input, ptr_feat_merge=args.ptr_feat_merge,
                          vocab_size=t_dataset.vocab.size, embedding=embedding,
                          embed_size=config.emsize, hidden_size=hidden_size, fdsize=fd_size, posit_size=posit_size,
                          sos_id=3, eos_id=2, unk_id=1,
                          rnn_cell=config.cell, directions=config.directions,
                          attn_src=args.attn_src, attn_level=args.attn_level,
                          attn_type=args.attn_type, attn_fuse=args.attn_fuse,
-                         pt_dec_feat=args.pt_dec_feat,
+                         ptr_dec_feat=args.ptr_dec_feat,
                          use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
                          field_self_att=args.field_self_att, field_cat_pos=args.field_cat_pos,
                          field_context=args.field_context, context_mlp=args.context_mlp,
@@ -416,12 +418,10 @@ if __name__ == "__main__":
     model = Seq2seq(encoder, decoder).to(device)
     if config.optimizer == 'adam':
         optimizer = optim.Adam(model.parameters(), lr=config.lr)
-        # scheduler = ReduceLROnPlateau(optimizer, 'min', factor=config.decay_rate) if config.decay_rate < 1 else None
+        scheduler = ReduceLROnPlateau(optimizer, 'min', patience=1, factor=config.decay_rate) if config.decay_rate < 1 else None
         # milestones = list(range(config.decay_start, config.epochs))
         # scheduler = MultiStepLR(optimizer, milestones, gamma=config.decay_rate) if config.decay_rate < 1 else None
-        # scheduler = ReduceLROnPlateau(optimizer, 'min', patience=1, verbose=True)
-        # TODO: use plateau scheduler
-        scheduler = ExponentialLR(optimizer, gamma=config.decay_rate) if config.decay_rate < 1 else None
+        # scheduler = ExponentialLR(optimizer, gamma=config.decay_rate) if config.decay_rate < 1 else None
     elif config.optimizer == 'adagrad':
         optimizer = optim.Adagrad(model.parameters(), lr=config.lr, lr_decay=config.decay_rate,
                                   initial_accumulator_value=0.1)
@@ -484,7 +484,9 @@ if __name__ == "__main__":
     # ----------------------------------- resume train ----------------------------------------- #
     # ------------------------------------------------------------------------------------------ #
     elif args.mode == 1:
+
         # TODO: catch up with the other parts
+
         model.load_state_dict(torch.load(args.save))
         load_epoch = int(args.save.split('.')[-1])
         L.info("model restored from epoch-{}: {}".format(load_epoch, args.save))
@@ -512,7 +514,7 @@ if __name__ == "__main__":
 
         L.info("Start Evaluating ...")
         cand, ref, perplexity, others = predictor.preeval_batch(dataset)
-        cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats = others
+        cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats, avg_len = others
 
         L.info('Result:')
         L.info('perplexity: {}'.format(perplexity))
@@ -549,11 +551,11 @@ if __name__ == "__main__":
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
-        cand, ref, perplexity, others = predictor.preeval_batch(dataset, fig=args.fig, save_dir=save_file_dir)
-        cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats = others
+        cand, ref, valid_ppl, others = predictor.preeval_batch(dataset, fig=args.fig, save_dir=save_file_dir)
+        cands_with_unks, cands_with_pgens, cands_ids, tgts_ids, srcs, feats, avg_len = others
 
         L.info('Result:')
-        L.info('perplexity: {}'.format(perplexity))
+        L.info('valid perplexity: {}'.format(valid_ppl))
         print('\nsource[1]: {}'.format(srcs[1]))
         if args.verbose:
             for k, v in feats.items():
