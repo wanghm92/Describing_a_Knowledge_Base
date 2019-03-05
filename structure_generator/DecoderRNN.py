@@ -263,7 +263,7 @@ class DecoderRNN(BaseRNN):
         return enc_hidden_keys, enc_input_keys, enc_field_keys
 
 
-    def _attn_score_cat(self, batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask):
+    def _attn_score_cat(self, batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask, no_dup_mask=None):
         """
         attention score in the form e = v` tanh(Wx+b)
         :param dec_query:  attention query vectors
@@ -280,6 +280,8 @@ class DecoderRNN(BaseRNN):
 
         et = vt(torch.tanh(attn_src).view(batch_size*max_enc_len, -1)).view(batch_size, max_enc_len)
         et.masked_fill_(enc_mask.data.byte(), -1e10)  # mask to -1e10 before applying softmax
+        if no_dup_mask is not None:
+            et.masked_fill_(no_dup_mask.data.byte(), -1e10)  # mask to -1e10 before applying softmax
 
         if not self.decoder_type == 'pt':
             score = F.softmax(et, dim=1)  # along direction of sequence length
@@ -287,7 +289,7 @@ class DecoderRNN(BaseRNN):
         else:
             return et
 
-    def _attn_score_dot(self, dec_query, enc_keys, enc_mask):
+    def _attn_score_dot(self, dec_query, enc_keys, enc_mask, no_dup_mask=None):
         """
         attention score in the form e = x*y
         :param dec_query:  attention query vectors
@@ -297,6 +299,8 @@ class DecoderRNN(BaseRNN):
 
         et = dec_query.unsqueeze(1).bmm(enc_keys.transpose(1, 2)).squeeze(1)
         et.masked_fill_(enc_mask.data.byte(), -1e10)
+        if no_dup_mask is not None:
+            et.masked_fill_(no_dup_mask.data.byte(), -1e10)  # mask to -1e10 before applying softmax
 
         if not self.decoder_type == 'pt':
             score = F.softmax(et, dim=1)  # along direction of sequence length
@@ -305,16 +309,18 @@ class DecoderRNN(BaseRNN):
             # NOTE: here et is masked to -1e10 at paddings
             return et
 
-    def _attn_score(self, batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask, attn_type='cat'):
+    def _attn_score(self, batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask,
+                    attn_type='cat', no_dup_mask=None):
         """ Wrapper for two types of attention scores: cat and dot"""
 
         if attn_type == 'cat':
-            return self._attn_score_cat(batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask)
+            return self._attn_score_cat(batch_size, max_enc_len, vt, dec_query, enc_keys,
+                                        cov_vector, enc_mask, no_dup_mask=no_dup_mask)
         else:
-            return self._attn_score_dot(dec_query, enc_keys, enc_mask)
+            return self._attn_score_dot(dec_query, enc_keys, enc_mask, no_dup_mask=no_dup_mask)
 
-    def _get_attn_score_fuse_cat(self, batch_size, max_enc_len, cov_vector, enc_mask,
-                                    dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys):
+    def _attn_score_fuse_cat(self, batch_size, max_enc_len, cov_vector, enc_mask, dec_hidden,
+                             enc_hidden_keys, enc_input_keys, enc_field_keys, no_dup_mask=None):
         """ normal multi-source attention score using cat"""
 
         dec_query = self.Wd(dec_hidden)
@@ -329,7 +335,8 @@ class DecoderRNN(BaseRNN):
         else:
             enc_keys = enc_hidden_keys
 
-        logit_or_score = self._attn_score(batch_size, max_enc_len, self.v, dec_query, enc_keys, cov_vector, enc_mask)
+        logit_or_score = self._attn_score(batch_size, max_enc_len, self.v, dec_query, enc_keys,
+                                          cov_vector, enc_mask, no_dup_mask=no_dup_mask)
 
         return logit_or_score, logit_or_score, logit_or_score
 
@@ -338,8 +345,8 @@ class DecoderRNN(BaseRNN):
         normalizer = t.sum(dim=-1, keepdim=True).add_(sys.float_info.epsilon)
         return torch.div(t, normalizer)
 
-    def _get_attn_score_fuse_hierarchical(self, batch_size, max_enc_len, cov_vector, enc_mask, dec_hidden,
-                                          enc_hidden_keys, enc_input_keys, enc_field_keys, attn_type='cat'):
+    def _attn_score_fuse_hier(self, batch_size, max_enc_len, cov_vector, enc_mask, dec_hidden,
+                              enc_hidden_keys, enc_input_keys, enc_field_keys, attn_type='cat', no_dup_mask=None):
         """ aggregated attention score with normalization from lower layers"""
 
         attn_score_top = None
@@ -352,11 +359,14 @@ class DecoderRNN(BaseRNN):
             dec_query_field = self.Wd_field(dec_hidden)
 
             attn_score_hidden = self._attn_score(batch_size, max_enc_len, self.v_hidden, dec_query_hidden, 
-                                                 enc_hidden_keys, cov_vector, enc_mask, attn_type=attn_type)
+                                                 enc_hidden_keys, cov_vector, enc_mask, attn_type=attn_type,
+                                                 no_dup_mask=no_dup_mask)
             attn_score_input = self._attn_score(batch_size, max_enc_len, self.v_input, dec_query_input,
-                                                enc_input_keys, None, enc_mask, attn_type=attn_type)
+                                                enc_input_keys, None, enc_mask, attn_type=attn_type,
+                                                no_dup_mask=no_dup_mask)
             attn_score_field = self._attn_score(batch_size, max_enc_len, self.v_field, dec_query_field, 
-                                                enc_field_keys, None, enc_mask, attn_type=attn_type)
+                                                enc_field_keys, None, enc_mask, attn_type=attn_type,
+                                                no_dup_mask=no_dup_mask)
 
             attn_score_btm = attn_score_field
             if self.attn_fuse == 'prod':
@@ -370,14 +380,16 @@ class DecoderRNN(BaseRNN):
             dec_query_field = self.Wd_field(dec_hidden)
 
             attn_score_field = self._attn_score(batch_size, max_enc_len, self.v_field, dec_query_field, 
-                                                enc_field_keys, None, enc_mask, attn_type=attn_type)
+                                                enc_field_keys, None, enc_mask, attn_type=attn_type,
+                                                no_dup_mask=no_dup_mask)
             attn_score_btm = attn_score_field
 
             if self.attn_src == 'emb':
                 dec_query_input = self.Wd_input(dec_hidden)
 
                 attn_score_input = self._attn_score(batch_size, max_enc_len, self.v_input, dec_query_input, 
-                                                    enc_input_keys, cov_vector, enc_mask, attn_type=attn_type)
+                                                    enc_input_keys, cov_vector, enc_mask, attn_type=attn_type,
+                                                    no_dup_mask=no_dup_mask)
                 if self.attn_fuse == 'prod':
                     attn_score_top = self._normalize(torch.mul(attn_score_input, attn_score_btm), enc_mask)
                 else:
@@ -387,7 +399,8 @@ class DecoderRNN(BaseRNN):
                 dec_query_hidden = self.Wd_hidden(dec_hidden)
 
                 attn_score_hidden = self._attn_score(batch_size, max_enc_len, self.v_hidden, dec_query_hidden, 
-                                                     enc_hidden_keys, cov_vector, enc_mask, attn_type=attn_type)
+                                                     enc_hidden_keys, cov_vector, enc_mask, attn_type=attn_type,
+                                                     no_dup_mask=no_dup_mask)
                 if self.attn_fuse == 'prod':
                     attn_score_top = self._normalize(torch.mul(attn_score_hidden, attn_score_btm), enc_mask)
                 else:
@@ -397,13 +410,14 @@ class DecoderRNN(BaseRNN):
             dec_query_hidden = self.Wd_hidden(dec_hidden)
 
             attn_score_hidden = self._attn_score(batch_size, max_enc_len, self.v_hidden, dec_query_hidden, 
-                                                 enc_hidden_keys, cov_vector, enc_mask, attn_type=attn_type)
+                                                 enc_hidden_keys, cov_vector, enc_mask, attn_type=attn_type,
+                                                 no_dup_mask=no_dup_mask)
             attn_score_top = attn_score_hidden
 
         return attn_score_top, attn_score_mid, attn_score_btm # TODO: check for pointer-net
 
     def _get_attn_scores(self, batch_size, max_enc_len, coverage, enc_mask, dec_hidden, 
-                         enc_hidden_keys, enc_input_keys, enc_field_keys, attn_type):
+                         enc_hidden_keys, enc_input_keys, enc_field_keys, attn_type='cat', no_dup_mask=None):
         """ Meta wrapper for attention scores with and without coverage"""
 
         if self.use_cov_attn:
@@ -412,11 +426,13 @@ class DecoderRNN(BaseRNN):
             cov_vector = None
 
         if self.attn_fuse == 'cat':
-            return self._get_attn_score_fuse_cat(batch_size, max_enc_len, cov_vector, enc_mask,
-                                                    dec_hidden, enc_hidden_keys, enc_input_keys, enc_field_keys)
+            return self._attn_score_fuse_cat(batch_size, max_enc_len, cov_vector, enc_mask, dec_hidden,
+                                             enc_hidden_keys, enc_input_keys, enc_field_keys,
+                                             no_dup_mask=no_dup_mask)
         else:
-            return self._get_attn_score_fuse_hierarchical(batch_size, max_enc_len, cov_vector, enc_mask, dec_hidden,
-                                                          enc_hidden_keys, enc_input_keys, enc_field_keys, attn_type)
+            return self._attn_score_fuse_hier(batch_size, max_enc_len, cov_vector, enc_mask, dec_hidden,
+                                              enc_hidden_keys, enc_input_keys, enc_field_keys, attn_type,
+                                              no_dup_mask=no_dup_mask)
 
     def _get_contexts(self, attn_scores, enc_hidden_vals, enc_input_vals, enc_field_vals):
         """ project encoder memory bank to compute the source context vectors, later weighted by attention scores"""
@@ -473,12 +489,14 @@ class DecoderRNN(BaseRNN):
                      dec_hidden, decoder_input,
                      enc_mask, max_enc_len,
                      enc_hidden_keys, enc_input_keys, enc_field_keys,
-                     enc_hidden_vals, enc_input_vals, enc_field_vals
+                     enc_hidden_vals, enc_input_vals, enc_field_vals,
+                     no_dup_mask=None
                      ):
         # print('input_ids: {}'.format(input_ids.size()))
         # coverage, weighted_coverage = coverage
         logit_or_attn_scores = self._get_attn_scores(batch_size, max_enc_len, coverage, enc_mask, dec_hidden,
-                                                     enc_hidden_keys, enc_input_keys, enc_field_keys, self.attn_type)
+                                                     enc_hidden_keys, enc_input_keys, enc_field_keys,
+                                                     self.attn_type, no_dup_mask=no_dup_mask)
 
         if self.decoder_type == 'pt':
             return logit_or_attn_scores[0], None, (None, None)
@@ -593,6 +611,8 @@ class DecoderRNN(BaseRNN):
             dec_lens = (targets > 0).float().sum(1)
 
             if self.decoder_type == 'pt':
+                no_dup_mask = np.zeros((batch_size, max_enc_len), dtype=np.float32)
+
                 # print('targets: {}'.format(targets.size()))
                 # print('enc_hidden: {}'.format(enc_hidden.size()))
                 # print('lab_t: {}'.format(lab_t.size()))
@@ -623,6 +643,8 @@ class DecoderRNN(BaseRNN):
             for step in range(max_length):
                 target_id = targets_id[:, step+1].unsqueeze(1)  # 0th is <SOS>, [batch] of ids of next word
 
+                no_dup_mask_tensor = torch.from_numpy(no_dup_mask).cuda()
+
                 dec_hidden = hidden[:, step, :]
                 decoder_input = decoder_inputs[:, step, :]
 
@@ -630,7 +652,8 @@ class DecoderRNN(BaseRNN):
                                                                      dec_hidden, decoder_input,
                                                                      enc_seq_mask, max_enc_len,
                                                                      enc_hidden_keys, enc_input_keys, enc_field_keys,
-                                                                     enc_hidden_vals, enc_input_vals, enc_field_vals)
+                                                                     enc_hidden_vals, enc_input_vals, enc_field_vals,
+                                                                     no_dup_mask=no_dup_mask_tensor)
 
                 target_mask_0 = target_id.eq(0).detach()
 
@@ -653,6 +676,10 @@ class DecoderRNN(BaseRNN):
                 else:
                     if self.decoder_type == 'pt':
                         target_id = lab_t[:, step + 1].unsqueeze(1)  # 0th is <SOS>, [batch] of ids of next word
+                        target_id_prev = lab_t[:, step]
+                        # TODO: this is not efficient
+                        for x, y in zip(range(batch_size), target_id_prev.tolist()):
+                            no_dup_mask[x][y] = 1
                         target_mask_0 = target_id.eq(0).squeeze(1).detach()
 
                     logits = logits_or_probs
@@ -690,7 +717,7 @@ class DecoderRNN(BaseRNN):
         enc_seq_mask, enc_non_stop_mask = enc_masks
         lengths = np.array([max_length] * batch_size)
         finished = np.array([False] * batch_size)
-        no_dup_mask = np.ones((batch_size, max_enc_len), dtype=np.float32)
+        no_dup_mask = np.zeros((batch_size, max_enc_len), dtype=np.float32)
         losses = []
         decoded_outputs = []
         locations = [] if self.decoder_type == 'pt' else None
@@ -749,13 +776,13 @@ class DecoderRNN(BaseRNN):
             no_dup_mask_tensor = torch.from_numpy(no_dup_mask).cuda()
             if step < self.min_length:
                 vocab_probs.masked_fill_(enc_non_stop_mask.data.byte(), 0.0)
-            vocab_probs = torch.mul(vocab_probs, no_dup_mask_tensor)
+            vocab_probs.masked_fill_(no_dup_mask_tensor.data.byte(), 0.0)
 
             probs, symbols_or_positions = vocab_probs.topk(1)  # greedy decoding: get word indices and probs
 
             # accumulate used positions
             for x, y in zip(range(batch_size), symbols_or_positions.squeeze(-1).tolist()):
-                no_dup_mask[x][y] = 0
+                no_dup_mask[x][y] = 1
 
             if self.decoder_type == 'pt':
                 # print('input_ids: {}'.format(input_ids.size()))
