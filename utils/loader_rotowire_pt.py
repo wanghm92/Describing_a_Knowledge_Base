@@ -267,7 +267,7 @@ class Table2text_seq:
         # ----------------------- load triples and build vocabulary ------------------------- #
         self.prepare_content_metrics()
         if data_src == 'train' and (train_mode != 0 and train_mode != 1):  # training(0) and resume training(1)
-            self.data = self.load_data_light(path)
+            self.load_vocab(path)
         else:
             self.data = self.load_data(path)
             self.len = len(self.data)
@@ -324,7 +324,7 @@ class Table2text_seq:
 
         return eval_outputs
 
-    def load_data_light(self, path):
+    def load_vocab(self, path):
         print("Loading data ** LIGHT ** from {}".format(path))
         prefix = "{}/table2text_nlg/describe_kb/outputs".format(HOME)
         vocab_path_pkl = "{}/rotowire_vocab_pt.pkl".format(prefix)
@@ -338,21 +338,6 @@ class Table2text_seq:
                                 rcd2idx=data["rcd2idx"], idx2rcd=data["idx2rcd"],
                                 ha2idx=data["ha2idx"], idx2ha=data["idx2ha"],
                                 dec_type=self.dec_type)
-
-        # print("Loading data ** LIGHT ** from {}".format(path))
-        # # (qkey, qitem, index)
-        # with open(path, 'rb') as fin:
-        #     data = pickle.load(fin)
-        # old_sources = data["source"]
-        # print("{} samples to be processed".format(len(old_sources)))
-        # for idx, old_source in enumerate(tqdm(old_sources)):
-        #     p_for = []
-        #     for key, value, pos, rpos in old_source:
-        #         p_for.append(pos)
-        #     curr_p_max = max(p_for) + 1
-        #     if self.max_p < curr_p_max:
-        #         self.max_p = curr_p_max
-
 
     def load_data(self, path):
 
@@ -432,6 +417,7 @@ class Table2text_seq:
         '''
         print("sorting samples ...")
         self.sort_indices = np.argsort([len(x[0]) for x in samples]).tolist()
+        # self.sort_indices = np.argsort([len(x[1][0]) for x in samples]).tolist()
         self.sort_indices.reverse()
         samples = np.array(samples)[self.sort_indices].tolist()
 
