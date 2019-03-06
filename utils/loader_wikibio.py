@@ -117,7 +117,7 @@ class Vocabulary:
                 # _source.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
         return _o_source, source_oov, _source, oov_freq
 
-    def vectorize_target(self, vector, source_oov, table):
+    def vectorize_target(self, vector, source_oov):
         _o_target, _target = [], []
         oov_freq = 0
         for word in vector:

@@ -38,7 +38,7 @@ class ConfigRotowire(object):
     def __init__(self):
         self.cell = "LSTM"
         self.optimizer = "adam"
-        self.decay_rate = 0.9
+        self.decay_rate = 0.95
         self.decay_start = 1
         self.emsize = 256
         self.fdsize = 128

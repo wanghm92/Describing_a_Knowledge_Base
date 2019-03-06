@@ -12,13 +12,10 @@ class Validator(object):
 
     def valid_batch(self, batch_idx):
         """ Run forward pass on valid set"""
-        batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_t, batch_o_t, source_len, max_source_oov, \
-        w2fs, sources, targets, fields, list_oovs = self.v_dataset.get_batch(batch_idx)
 
-        losses = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
-                            target=batch_t, target_id=batch_o_t,
-                            input_lengths=source_len, max_source_oov=max_source_oov,
-                            teacher_forcing_ratio=self.teacher_forcing_ratio)
+        data_packages, _, remaining = self.v_dataset.get_batch(batch_idx)
+        source_len = remaining[0]
+        losses = self.model(data_packages, remaining, teacher_forcing_ratio=self.teacher_forcing_ratio)
         batch_loss = losses.mean()
         return batch_loss.item(), len(source_len)
 

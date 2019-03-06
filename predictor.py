@@ -56,12 +56,18 @@ class Predictor(object):
 
         print("{} batches to be evaluated".format(total_batches))
         for batch_idx in tqdm(range(total_batches)):
-            batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_t, batch_o_t, source_len, max_source_oov, \
-            w2fs, sources, targets, fields, list_oovs = dataset.get_batch(batch_idx)
-            lab_t = batch_t[-1]
+            data_packages, texts_package, remaining = dataset.get_batch(batch_idx)
+            sources, fields, summaries, outlines = texts_package
+            list_oovs = remaining[-1]
 
-            everything = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
-                                    w2fs=w2fs, input_lengths=source_len, max_source_oov=max_source_oov, fig=True)
+            batch_pf = data_packages[0][-2]
+            if self.decoder_type in ['pt', 'prn']:
+                lab_t = data_packages[1][-1]
+                targets = outlines
+            else:
+                targets = summaries
+            everything = self.model(data_packages, remaining, fig=True)
+
             decouts, locations, lens, losses, p_gens, selfatt, attns = everything
             token_count += sum(lens)
             pred_loss += sum(losses)

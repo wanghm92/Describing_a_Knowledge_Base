@@ -5,9 +5,11 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import *
 from predictor import Predictor
-from structure_generator.EncoderRNN import EncoderRNN
-from structure_generator.DecoderRNN import DecoderRNN
-from structure_generator.seq2seq import Seq2seq
+from models.EncoderRNN import EncoderRNN
+from models.DecoderRNN import DecoderRNN
+from models.seq2seq import Seq2seq
+from models.ptr_net import PointerNet
+from models.prn import PRN
 from configurations import Config, ConfigSmall, ConfigTest, ConfigWikibio, ConfigRotowire
 from metrics import Metrics
 from validator import Validator
@@ -32,7 +34,7 @@ parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
 parser.add_argument('--cuda', action='store_false',
                     help='use CUDA')
-parser.add_argument('--dec_type', type=str, default='pg', choices=['pg', 'pt', 'seq'],
+parser.add_argument('--dec_type', type=str, default='pg', choices=['pg', 'pt', 'seq', 'prn'],
                     help='decoder model type pg(pointer-generator)/pt(pointer-net)(WIP)/seq(seq2seq)')
 parser.add_argument('--enc_type', type=str, default='rnn', choices=['rnn', 'fc', 'trans'],
                     help='encoder model type')
@@ -74,7 +76,7 @@ parser.add_argument('--field_cat_pos', action='store_true',
 parser.add_argument('--field_context', action='store_false',
                     help='whether pass context vector of field embeddings to output layer')
 
-parser.add_argument('--ptr_input', type=str, default='emb', choices=['emb', 'hid'],
+parser.add_argument('--ptr_input', type=str, default='hid', choices=['emb', 'hid'],
                     help='input to pointer-network emb: normal word+feat/hidden: memory bank hidden vectors')
 parser.add_argument('--ptr_dec_feat', action='store_false',
                     help='whether to cat features for ptr-net decoder')
@@ -165,13 +167,9 @@ pprint.pprint(vars(args), indent=2)
 
 def train_batch(dataset, batch_idx, model, teacher_forcing_ratio):
     """ Train with one batch """
-    batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_t, batch_o_t, source_len, max_source_oov = \
-        dataset.get_batch(batch_idx)
-
-    losses = model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
-                   target=batch_t, target_id=batch_o_t,
-                   input_lengths=source_len, max_source_oov=max_source_oov,
-                   teacher_forcing_ratio=teacher_forcing_ratio)
+    data_packages, _, remaining = dataset.get_batch(batch_idx)
+    source_len = remaining[0]
+    losses = model(data_packages, remaining, teacher_forcing_ratio)
 
     batch_loss = losses.mean()
     model.zero_grad()
@@ -415,13 +413,19 @@ if __name__ == "__main__":
                          dropout_p=config.dropout, n_layers=config.nlayers,
                          field_embedding=field_embedding, pos_embedding=pos_embedding, dataset_type=args.type)
 
-    model = Seq2seq(encoder, decoder).to(device)
+    if args.dec_type in ['pg', 'seq']:
+        model = Seq2seq(encoder, decoder).to(device)
+    elif args.dec_type == 'pt':
+        model = PointerNet(encoder, decoder).to(device)
+    else:
+        model = PRN(encoder, decoder).to(device)
+
     if config.optimizer == 'adam':
         optimizer = optim.Adam(model.parameters(), lr=config.lr)
-        scheduler = ReduceLROnPlateau(optimizer, 'min', patience=1, factor=config.decay_rate) if config.decay_rate < 1 else None
+        # scheduler = ReduceLROnPlateau(optimizer, 'min', patience=1, factor=config.decay_rate) if config.decay_rate < 1 else None
         # milestones = list(range(config.decay_start, config.epochs))
         # scheduler = MultiStepLR(optimizer, milestones, gamma=config.decay_rate) if config.decay_rate < 1 else None
-        # scheduler = ExponentialLR(optimizer, gamma=config.decay_rate) if config.decay_rate < 1 else None
+        scheduler = ExponentialLR(optimizer, gamma=config.decay_rate) if config.decay_rate < 1 else None
     elif config.optimizer == 'adagrad':
         optimizer = optim.Adagrad(model.parameters(), lr=config.lr, lr_decay=config.decay_rate,
                                   initial_accumulator_value=0.1)

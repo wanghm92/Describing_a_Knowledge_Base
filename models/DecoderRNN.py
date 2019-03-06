@@ -485,7 +485,7 @@ class DecoderRNN(BaseRNN):
         return enc_output_context, enc_context_proj
 
     def _decode_step(self,
-                     batch_size, input_ids, coverage, max_source_oov,
+                     batch_size, input_ids, coverage, max_tail_oov,
                      dec_hidden, decoder_input,
                      enc_mask, max_enc_len,
                      enc_hidden_keys, enc_input_keys, enc_field_keys,
@@ -538,10 +538,10 @@ class DecoderRNN(BaseRNN):
                 weighted_attn = (1-p_gen) * attn_weights  # * (1-weighted_coverage.clamp(0, 1))
                 # print('weighted_attn: {}'.format(weighted_attn.size()))
 
-                # print('max_source_oov: {}'.format(max_source_oov))
-                if max_source_oov > 0:
+                # print('max_tail_oov: {}'.format(max_tail_oov))
+                if max_tail_oov > 0:
                     # create OOV (but in-article) zero vectors
-                    ext_vocab = torch.zeros(batch_size, max_source_oov)
+                    ext_vocab = torch.zeros(batch_size, max_tail_oov)
                     if self.use_cuda:
                         ext_vocab=ext_vocab.cuda()
                     # print('ext_vocab: {}'.format(ext_vocab.size()))
@@ -560,7 +560,7 @@ class DecoderRNN(BaseRNN):
             elif self.decoder_type == 'seq':
                 return out_vec, attn_weights, (None, None)
 
-    def forward(self, max_source_oov=0, targets=None, targets_id=None, input_ids=None,
+    def forward(self, max_tail_oov=0, targets=None, targets_id=None, input_ids=None,
                 enc_hidden=None, enc_input=None, enc_state=None, enc_masks=None, enc_field=None, enc_pos=None,
                 teacher_forcing_ratio=None, w2fs=None, fig=False):
         """
@@ -653,7 +653,7 @@ class DecoderRNN(BaseRNN):
                 dec_hidden = hidden[:, step, :]
                 decoder_input = decoder_inputs[:, step, :]
 
-                logits_or_probs, attn_weights, _ = self._decode_step(batch_size, input_ids, coverage, max_source_oov,
+                logits_or_probs, attn_weights, _ = self._decode_step(batch_size, input_ids, coverage, max_tail_oov,
                                                                      dec_hidden, decoder_input,
                                                                      enc_seq_mask, max_enc_len,
                                                                      enc_hidden_keys, enc_input_keys, enc_field_keys,
@@ -703,13 +703,13 @@ class DecoderRNN(BaseRNN):
 
             return total_masked_loss
         else:
-            return self.evaluate(targets, batch_size, max_length, max_source_oov,
+            return self.evaluate(targets, batch_size, max_length, max_tail_oov,
                                  f_matrix, decoder_hidden_init, enc_masks, input_ids, coverage,
                                  enc_hidden_keys, enc_input_keys, enc_field_keys,
                                  enc_hidden_vals, enc_input_vals, enc_field_vals,
                                  max_enc_len, w2fs, fig)
 
-    def evaluate(self, targets, batch_size, max_length, max_source_oov,
+    def evaluate(self, targets, batch_size, max_length, max_tail_oov,
                  f_matrix, decoder_hidden_init, enc_masks, input_ids, coverage,
                  enc_hidden_keys, enc_input_keys, enc_field_keys,
                  enc_hidden_vals, enc_input_vals, enc_field_vals,
@@ -760,7 +760,7 @@ class DecoderRNN(BaseRNN):
                 no_dup_mask_tensor = torch.from_numpy(no_dup_mask).cuda()
 
             logits_or_prob, attn_weights, (p_gen, src_prob) = self._decode_step(batch_size, input_ids, coverage,
-                                                                                max_source_oov,
+                                                                                max_tail_oov,
                                                                                 dec_hidden.squeeze(1),
                                                                                 decoder_input.squeeze(1),
                                                                                 enc_seq_mask, max_enc_len,
@@ -918,7 +918,7 @@ class DecoderRNN(BaseRNN):
 
         # set default targets and max decoding length
         if targets is None:
-            if teacher_forcing_ratio > 0:
+            if teacher_forcing_ratio:
                 raise ValueError("Teacher forcing has to be disabled (set 0) when no targets is provided.")
             targets = torch.LongTensor([self.sos_id] * batch_size).view(batch_size, 1)
             if self.decoder_type == 'pt':

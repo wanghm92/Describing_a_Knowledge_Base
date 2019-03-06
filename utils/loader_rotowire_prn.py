@@ -113,52 +113,24 @@ class Vocabulary:
         self.field_vocab = Counter(field_vocab)
         self.rcd_vocab = Counter(rcd_vocab)
 
+    def _build_luts(self, vocab):
+        tk2idx = {'<PAD>': 0, '<UNK>': 1, '<EOS>': 2, '<SOS>': 3}
+        offset = len(tk2idx)
+        for idx, word in enumerate(vocab):
+            tk2idx[word] = idx + offset
+        idx2tk = {idx: word for word, idx in tk2idx.items()}
+        return tk2idx, idx2tk
+
     def _build_word_index(self):
-
+        """ build tk2idx and idx2tk look-up tables"""
         # word idx
-        self.word2idx['<PAD>'] = 0
-        self.word2idx['<UNK>'] = 1
-        if self.start_end_tokens:
-            self.word2idx['<EOS>'] = 2
-            self.word2idx['<SOS>'] = 3
-
-        offset = len(self.word2idx)
-        for idx, word in enumerate(self.vocabulary):
-            self.word2idx[word] = idx + offset
-        self.idx2word = {idx: word for word, idx in self.word2idx.items()}
-
+        self.word2idx, self.idx2word = self._build_luts(self.vocabulary)
         # field idx
-        self.field2idx['<PAD>'] = 0
-        self.field2idx['<UNK>'] = 1
-        if self.dec_type == 'pt':
-            self.field2idx['<EOS>'] = 2
-            self.field2idx['<SOS>'] = 3
-
-        offset = len(self.field2idx)
-        for idx, fd in enumerate(self.field_vocab):
-            self.field2idx[fd] = idx + offset
-        self.idx2field = {idx: fd for fd, idx in self.field2idx.items()}
-
+        self.field2idx, self.idx2field = self._build_luts(self.field_vocab)
         # record type idx
-        self.rcd2idx['<PAD>'] = 0
-        self.rcd2idx['<UNK>'] = 1
-        if self.dec_type == 'pt':
-            self.rcd2idx['<EOS>'] = 2
-            self.rcd2idx['<SOS>'] = 3
-
-        offset = len(self.rcd2idx)
-        for idx, r in enumerate(self.rcd_vocab):
-            self.rcd2idx[r] = idx + offset
-        self.idx2rcd = {idx: r for r, idx in self.rcd2idx.items()}
-
+        self.rcd2idx, self.idx2rcd = self._build_luts(self.rcd_vocab)
         # home/away idx
-        self.ha2idx['<PAD>'] = 0
-        self.ha2idx['<UNK>'] = 1
-        if self.dec_type == 'pt':
-            self.ha2idx['<EOS>'] = 2
-            self.ha2idx['<SOS>'] = 3
-        self.ha2idx['HOME'] = 4
-        self.ha2idx['AWAY'] = 5
+        self.ha2idx = {'<PAD>': 0, '<UNK>': 1, '<EOS>': 2, '<SOS>': 3, 'HOME': 4, 'AWAY':5}
         self.idx2ha = {idx: h for h, idx in self.ha2idx.items()}
 
     def add_start_end(self, vector, item2idx=None):
@@ -166,7 +138,7 @@ class Vocabulary:
         vector.append(item2idx['<EOS>'])
         return [item2idx['<SOS>']] + vector
 
-    def vectorize_feature(self, vector, ft_type='field', is_target=False):
+    def vectorize_feature(self, vector, ft_type='field'):
 
         if ft_type == 'field':
             ft2idx = self.field2idx
@@ -178,17 +150,14 @@ class Vocabulary:
             raise ValueError("{} not supported".format(ft_type))
 
         _ft = [ft2idx.get(x, ft2idx['<UNK>']) for x in vector]
-        if self.dec_type == 'pt':
+        if self.dec_type in ['pt', 'prn']:
             # add <SOS> at the beginning and <EOS> to the end for ptr-net to choose from
-            # _ft.append(ft2idx['<EOS>'])
             _ft = self.add_start_end(_ft, item2idx=ft2idx)
-            # if is_target:
-            #     _ft = [ft2idx['<SOS>']] + _ft
         return _ft
 
-    def vectorize_source(self, vector, table):
+    def vectorize_source(self, vector):
         """ source word to idx"""
-        source_oov = {}
+        _oov = {}
         _o_source, _source = [], []
         cnt = 0
         oov_freq = 0
@@ -199,12 +168,12 @@ class Vocabulary:
             except KeyError:
                 oov_freq += 1
                 if self.dec_type == 'pg':
-                    if word not in source_oov:
+                    if word not in _oov:
                         _o_source.append(cnt + self.size)
-                        source_oov[word] = cnt
+                        _oov[word] = cnt
                         cnt += 1
                     else:
-                        _o_source.append(source_oov[word] + self.size)
+                        _o_source.append(_oov[word] + self.size)
                 else:
                     _o_source.append(self.word2idx['<UNK>'])
                 _source.append(self.word2idx['<UNK>'])
@@ -212,33 +181,67 @@ class Vocabulary:
                 # _source.append(self.word2idx.get(table[word], self.word2idx['<UNK>']))
 
         # add <SOS> at the beginning and <EOS> to the end for ptr-net to choose from
-        if self.dec_type == 'pt':
+        if self.dec_type in ['pt', 'prn']:
             # _o_source.append(self.word2idx['<EOS>'])
             # _source.append(self.word2idx['<EOS>'])
             _o_source = self.add_start_end(_o_source, item2idx=self.word2idx)
             _source = self.add_start_end(_source, item2idx=self.word2idx)
-        return _o_source, source_oov, _source, oov_freq
+        return _o_source, _oov, _source, oov_freq
 
-    def vectorize_target(self, vector, source_oov, table):
-        """ target value to idx"""
-        _o_target, _target = [], []
+    def vectorize_outline(self, vector):
+        """ outline tokens to idx"""
+        _oov = {}
+        cnt = 0
+        _o_outline, _outline = [], []
         oov_freq = 0
         for word in vector:
             try:
-                _o_target.append(self.word2idx[word])
-                _target.append(self.word2idx[word])
+                _o_outline.append(self.word2idx[word])
+                _outline.append(self.word2idx[word])
             except KeyError:
                 oov_freq += 1
-                _o_target.append(self.word2idx['<UNK>'])
-                _target.append(self.word2idx['<UNK>'])
-        return self.add_start_end(_o_target, self.word2idx), self.add_start_end(_target, self.word2idx), oov_freq
+                if self.dec_type in ['pt', 'prn']:
+                    if word not in _oov:
+                        _o_outline.append(cnt + self.size)
+                        _oov[word] = cnt
+                        cnt += 1
+                    else:
+                        _o_outline.append(_oov[word] + self.size)
+                else:
+                    _o_outline.append(self.word2idx['<UNK>'])
+                _outline.append(self.word2idx['<UNK>'])
+
+        return self.add_start_end(_o_outline, self.word2idx), _oov, self.add_start_end(_outline, self.word2idx), oov_freq
+
+    def vectorize_summary(self, vector, tail_oov_vocab=None):
+        """ summary word to idx"""
+        _o_summary, _summary = [], []
+        oov_freq = 0
+        for word in vector:
+            try:
+                _o_summary.append(self.word2idx[word])
+                _summary.append(self.word2idx[word])
+            except KeyError:
+                oov_freq += 1
+                if tail_oov_vocab:
+                    if word not in tail_oov_vocab:
+                        _o_summary.append(self.word2idx['<UNK>'])
+                        _summary.append(self.word2idx['<UNK>'])
+                    else:
+                        _o_summary.append(tail_oov_vocab[word] + self.size)
+                        _summary.append(self.word2idx['<UNK>'])
+                else:
+                    _o_summary.append(self.word2idx['<UNK>'])
+                    _summary.append(self.word2idx['<UNK>'])
+
+        return self.add_start_end(_o_summary, self.word2idx), self.add_start_end(_summary, self.word2idx), oov_freq
 
 
 class Table2text_seq:
     def __init__(self, data_src, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available(),
                  train_mode=0, dec_type='pg'):
         # TODO: change the path
-        prefix = "{}/table2text_nlg/data/dkb/rotowire_pt/".format(HOME)
+        prefix = "{}/table2text_nlg/data/dkb/rotowire_prn/".format(HOME)
 
         assert type == 3
         self.vocab = None
@@ -250,9 +253,11 @@ class Table2text_seq:
         self.device = torch.device("cuda" if USE_CUDA else "cpu")
 
         self.oov_cnt_src = 0
-        self.oov_cnt_tgt = 0
+        self.oov_cnt_otl = 0
+        self.oov_cnt_sum = 0
         self.total_cnt_src = 0
-        self.total_cnt_tgt = 0
+        self.total_cnt_otl = 0
+        self.total_cnt_sum = 0
 
         # ----------------------- file names ------------------------- #
         if data_src == 'train' or data_src == 'train4eval':
@@ -267,7 +272,7 @@ class Table2text_seq:
         # ----------------------- load triples and build vocabulary ------------------------- #
         self.prepare_content_metrics()
         if data_src == 'train' and (train_mode != 0 and train_mode != 1):  # training(0) and resume training(1)
-            self.data = self.load_data_light(path)
+            self.load_vocab(path)
         else:
             self.data = self.load_data(path)
             self.len = len(self.data)
@@ -324,7 +329,7 @@ class Table2text_seq:
 
         return eval_outputs
 
-    def load_data_light(self, path):
+    def load_vocab(self, path):
         print("Loading data ** LIGHT ** from {}".format(path))
         prefix = "{}/table2text_nlg/describe_kb/outputs".format(HOME)
         vocab_path_pkl = "{}/rotowire_vocab_pt.pkl".format(prefix)
@@ -339,21 +344,6 @@ class Table2text_seq:
                                 ha2idx=data["ha2idx"], idx2ha=data["idx2ha"],
                                 dec_type=self.dec_type)
 
-        # print("Loading data ** LIGHT ** from {}".format(path))
-        # # (qkey, qitem, index)
-        # with open(path, 'rb') as fin:
-        #     data = pickle.load(fin)
-        # old_sources = data["source"]
-        # print("{} samples to be processed".format(len(old_sources)))
-        # for idx, old_source in enumerate(tqdm(old_sources)):
-        #     p_for = []
-        #     for key, value, pos, rpos in old_source:
-        #         p_for.append(pos)
-        #     curr_p_max = max(p_for) + 1
-        #     if self.max_p < curr_p_max:
-        #         self.max_p = curr_p_max
-
-
     def load_data(self, path):
 
         # TODO: add TEAM/PLAYER feature
@@ -364,7 +354,8 @@ class Table2text_seq:
         with open(path, 'rb') as fin:
             data = pickle.load(fin)
         old_sources = data["source"]
-        old_targets = data["target"]
+        old_outlines = data["outlines"]
+        old_summaries = data["summaries"]
         samples = []
         total = []
         total_field = []
@@ -390,8 +381,8 @@ class Table2text_seq:
                 if value not in table:
                     table[value] = tag
 
-            old_target = old_targets[idx]
-            temp = copy.deepcopy(old_target)
+            old_outline = old_outlines[idx]
+            temp = copy.deepcopy(old_outline)
             if len(list(temp)) > self.text_len:
                 self.text_len = len(list(temp)) + 2
 
@@ -400,7 +391,7 @@ class Table2text_seq:
             rcd_t = []
             ha_t = []
             lab_t = []
-            for key, value, rcd, ha, lab in old_target:
+            for key, value, rcd, ha, lab in old_outline:
                 value = value.lower()  # NOTE: changed to lowercase strings
                 key = key.lower()  # NOTE: changed to lowercase strings
                 tag = '<'+key+'>'  # NOTE: change key into special tokens
@@ -409,6 +400,9 @@ class Table2text_seq:
                 rcd_t.append(rcd)
                 ha_t.append(ha)
                 lab_t.append(lab+1)  # int
+
+            summary = old_summaries[idx]
+            summary = [x.lower() for x in summary]  # NOTE: changed to lowercase strings
 
             # print("value_s: \n{}".format(value_s))
             # print("field_s: \n{}".format(field_s))
@@ -419,19 +413,20 @@ class Table2text_seq:
             # print("rcd_t: \n{}".format(rcd_t))
             # print("ha_t: \n{}".format(ha_t))
             # print("lab_t: \n{}".format(lab_t))
-            # sys.exit(0)
+            # print("summary: \n{}".format(summary))
 
-            target = (value_t, field_t, rcd_t, ha_t, lab_t)
-            total.append(value_s + value_t)
+            outline = (value_t, field_t, rcd_t, ha_t, lab_t)
+            total.append(value_s + value_t + summary)
             total_field.append(field_s + field_t)
             total_rcd.append(rcd_s + rcd_t)
-            samples.append([value_s, target, field_s, rcd_s, ha_s, table])
+            samples.append([value_s, outline, field_s, rcd_s, ha_s, table, summary])
 
         '''
             torch.nn.utils.rnn.pack_padded_sequence requires the sequence lengths sorted in decreasing order
         '''
         print("sorting samples ...")
         self.sort_indices = np.argsort([len(x[0]) for x in samples]).tolist()
+        # self.sort_indices = np.argsort([len(x[1][0]) for x in samples]).tolist()
         self.sort_indices.reverse()
         samples = np.array(samples)[self.sort_indices].tolist()
 
@@ -472,9 +467,11 @@ class Table2text_seq:
         for sample in tqdm(samples):
             corpus.append(self.vectorize(sample))
         print("oov_cnt_src: {0} ({1:.3f}%)".format(self.oov_cnt_src, 100.0*self.oov_cnt_src/self.total_cnt_src))
-        print("oov_cnt_tgt: {0} ({1:.3f}%)".format(self.oov_cnt_tgt, 100.0*self.oov_cnt_tgt/self.total_cnt_tgt))
+        print("oov_cnt_otl: {0} ({1:.3f}%)".format(self.oov_cnt_otl, 100.0*self.oov_cnt_otl/self.total_cnt_otl))
+        print("oov_cnt_sum: {0} ({1:.3f}%)".format(self.oov_cnt_sum, 100.0*self.oov_cnt_sum/self.total_cnt_sum))
         print("total_cnt_src: {}".format(self.total_cnt_src))
-        print("total_cnt_tgt: {}".format(self.total_cnt_tgt))
+        print("total_cnt_otl: {}".format(self.total_cnt_otl))
+        print("total_cnt_sum: {}".format(self.total_cnt_sum))
         return corpus
 
     def pad_vector(self, vector, maxlen):
@@ -487,7 +484,7 @@ class Table2text_seq:
             batch_s         --> tensor batch of table with ids
             batch_o_s       --> tensor batch of table with ids and <unk> replaced by temp OOV ids
             batch_t         --> tensor batch of text with ids
-            batch_o_t       --> tensor batch of target and <unk> replaced by temp OOV ids
+            batch_o_t       --> tensor batch of outline and <unk> replaced by temp OOV ids
             batch_f         --> tensor batch of field with ids(might not exist)
             batch_pf        --> tensor batch of forward position
             batch_pb        --> tensor batch of backward position
@@ -495,181 +492,188 @@ class Table2text_seq:
             max_article_oov --> max number of OOV tokens in article batch
         """
 
-        # print(len(sample))
-        batch_o_s, batch_o_t, batch_f, batch_t, batch_s, batch_pf, batch_pb = [], [], [], [], [], [], []
-        if self.dec_type == 'pt':
-            batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t = [], [], [], []
-        source_len, target_len, w2fs = [], [], []
+        batch_o_s, batch_s, batch_f, batch_pf, batch_pb = [], [], [], [], []
+        batch_o_t, batch_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t = [], [], [], [], [], []
+        batch_sum, batch_o_sum = [], []
+        source_len, outline_len, summary_len, w2fs = [], [], [], []
+        sources, fields, rcds, has, outlines, summaries = [], [], [], [], [], []
         list_oovs = []
-        targets = []
-        sources = []
-        fields = []
-        rcds = []
-        has = []
-        max_source_oov = 0
+        max_tail_oov = 0
         for data in sample:
             # print("data: {}".format(data))
-            # data: [value_s, target, field_s, rcd_s, ha_s, table]
+            # data: [value_s, outline, field_s, rcd_s, ha_s, table, summary]
             source = data[0]
-            target = data[1]  # (value_t, field_t, rcd_t, ha_t, lab_t)
+            outline = data[1]  # (value_t, field_t, rcd_t, ha_t, lab_t)
             field = data[2]
             rcd = data[3]
             ha = data[4]
             table = data[5]
-            src_len = len(source)
-            if self.dec_type == 'pt':
-                value_t, field_t, rcd_t, ha_t, lab_t = target  #tokens
-                src_len += 2  # <EOS> and <SOS>
-                tgt_len = len(value_t) + 2   # <EOS> and <SOS>
-            else:
-                tgt_len = len(target) + 2
+            summary = data[6]
+            value_t, field_t, rcd_t, ha_t, lab_t = outline  #tokens
+
+            # <EOS> and <SOS>
+            src_len = len(source) + 2
+            sum_len = len(summary) + 2
+            otl_len = len(value_t) + 2
 
             # print("src_len: {}".format(src_len))
-            # print("tgt_len: {}".format(tgt_len))
+            # print("otl_len: {}".format(otl_len))
+            # print("sum_len: {}".format(sum_len))
 
             source_len.append(src_len)
-            target_len.append(tgt_len)
+            outline_len.append(otl_len)
+            summary_len.append(sum_len)
 
-            # ----------------------- word to ids ------------------------- #
-            _o_source, source_oov, _source, oov_freq_src = self.vocab.vectorize_source(source, table)
+            # ----------------------- source word and features to ids ------------------------- #
+            _o_source, source_oov, _source, oov_freq_src = self.vocab.vectorize_source(source)
             _fields = self.vocab.vectorize_feature(field, ft_type='field')
             _rcd = self.vocab.vectorize_feature(rcd, ft_type='rcd')
             _ha = self.vocab.vectorize_feature(ha, ft_type='ha')
-            if self.dec_type == 'pt':
-                _o_target, _target, oov_freq_tgt = self.vocab.vectorize_target(value_t, source_oov, table)
-                _fields_t = self.vocab.vectorize_feature(field_t, ft_type='field', is_target=True)
-                _rcd_t = self.vocab.vectorize_feature(rcd_t, ft_type='rcd', is_target=True)
-                _ha_t = self.vocab.vectorize_feature(ha_t, ft_type='ha', is_target=True)
-                lab_t = [0] + lab_t
-                lab_t.append(src_len-1)
+
+            # ----------------------- outline word and features to ids ------------------------- #
+            _o_outline, outline_oov, _outline, oov_freq_otl = self.vocab.vectorize_outline(value_t)
+            _fields_t = self.vocab.vectorize_feature(field_t, ft_type='field')
+            _rcd_t = self.vocab.vectorize_feature(rcd_t, ft_type='rcd')
+            _ha_t = self.vocab.vectorize_feature(ha_t, ft_type='ha')
+            _lab_t = [0] + lab_t + [src_len-1]
+
+            # ----------------------- summary word to ids ------------------------- #
+            if self.dec_type == 'pg':
+                tail_oov_vocab = source_oov
+            elif self.dec_type == 'prn':
+                tail_oov_vocab = outline_oov
             else:
-                _o_target, _target, oov_freq_tgt = self.vocab.vectorize_target(target, source_oov, table)
+                tail_oov_vocab = None
 
+            _o_summary, _summary, oov_freq_sum = self.vocab.vectorize_summary(summary, tail_oov_vocab)
+
+            # ----------------------- update oov stats ------------------------- #
             self.oov_cnt_src += oov_freq_src
-            self.oov_cnt_tgt += oov_freq_tgt
+            self.oov_cnt_otl += oov_freq_otl
+            self.oov_cnt_sum += oov_freq_sum
             self.total_cnt_src += len(_source)
-            self.total_cnt_tgt += len(_target)
+            self.total_cnt_otl += len(_outline)
+            self.total_cnt_sum += len(_summary)
 
-            source_oov = source_oov.items()
-            if max_source_oov < len(source_oov):
-                max_source_oov = len(source_oov)
-            if self.data_src != 'train':
-                idx2word_oov = {idx: word for word, idx in source_oov}
-                # w2f = {(idx+self.vocab.size): self.vocab.word2idx['<UNK>'] for word, idx in source_oov}
+            # ----------------------- prepare for evaluation ------------------------- #
+            if tail_oov_vocab:
+                tail_oov_vocab = tail_oov_vocab.items()
+                if max_tail_oov < len(tail_oov_vocab):
+                    max_tail_oov = len(tail_oov_vocab)
+                idx2word_oov = {idx: word for word, idx in tail_oov_vocab}
+                # w2f = {(idx+self.vocab.size): self.vocab.word2idx['<UNK>'] for word, idx in tail_oov_vocab}
                 w2f = {(idx + self.vocab.size): self.vocab.word2idx.get(table[word], self.vocab.word2idx['<UNK>'])
-                       for word, idx in source_oov}
+                       for word, idx in tail_oov_vocab}
                 w2fs.append(w2f)
                 list_oovs.append(idx2word_oov)
-                if self.dec_type == 'pt':
-                    targets.append(value_t)  # tokens
-                    rcds.append(rcd)
-                    has.append(ha)
-                else:
-                    targets.append(target)  # tokens
-                sources.append(source)  # tokens
-                fields.append(field)    # tokens
 
-            # print("_o_source ({}): {}".format(len(_o_source), _o_source))
+            if self.data_src != 'train':
+                sources.append(source)
+                fields.append(field)
+                rcds.append(rcd)
+                has.append(ha)
+                outlines.append(value_t)
+                summaries.append(summary)
+
+            # print("_source ({}): {}".format(len(_source), _source))
             # print("_fields ({}): {}".format(len(_fields), _fields))
             # print("_rcd ({}): {}".format(len(_rcd), _rcd))
             # print("_ha ({}): {}".format(len(_ha), _ha))
-            # print("_source ({}): {}".format(len(_source), _source))
-            # print("_o_target ({}): {}".format(len(_o_target), _o_target))
-            # print("_fields_t ({}): {}".format(len(_fields_t), _fields_t))
-            # print("_rcd_t ({}): {}".format(len(_rcd_t), _rcd_t))
-            # print("_ha_t ({}): {}".format(len(_ha_t), _ha_t))
-            # print("_target ({}): {}".format(len(_target), _target))
-            # print("lab_t ({}): {}".format(len(lab_t), lab_t))
-            # sys.exit(0)
+            # print("_o_source ({}): {}".format(len(_o_source), _o_source))
 
             assert len(_source) == len(_fields) == len(_rcd) == len(_ha) == len(_o_source) == src_len
             batch_s.append(_source)
             batch_f.append(_fields)
             batch_pf.append(_rcd)
             batch_pb.append(_ha)
-            batch_o_s.append(_o_source)
+            batch_o_s.append(_o_source)  # for scatter add
 
-            assert len(_target) == len(_fields_t) == len(_rcd_t) == len(_ha_t) == len(lab_t) == len(_o_target) == tgt_len
-            batch_t.append(_target)
-            batch_o_t.append(_o_target)
-            if self.dec_type == 'pt':
-                batch_f_t.append(_fields_t)
-                batch_pf_t.append(_rcd_t)
-                batch_pb_t.append(_ha_t)
-                batch_lab_t.append(lab_t)
+            # print("_outline ({}): {}".format(len(_outline), _outline))
+            # print("_outline_t ({}): {}".format(len(_fields_t), _fields_t))
+            # print("_rcd_t ({}): {}".format(len(_rcd_t), _rcd_t))
+            # print("_ha_t ({}): {}".format(len(_ha_t), _ha_t))
+            # print("_lab_t ({}): {}".format(len(_lab_t), _lab_t))
+            # print("_o_outline ({}): {}".format(len(_o_outline), _o_outline))
 
-        batch_s = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_s]
-        batch_f = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_f]
-        batch_pf = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_pf]
-        batch_pb = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_pb]
-        batch_o_s = [torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_o_s]
+            assert len(_outline) == len(_fields_t) == len(_rcd_t) == len(_ha_t) == len(_lab_t) == len(_o_outline) == otl_len
+            batch_t.append(_outline)
+            batch_o_t.append(_outline)  # for scatter add
+            batch_f_t.append(_fields_t)
+            batch_pf_t.append(_rcd_t)
+            batch_pb_t.append(_ha_t)
+            batch_lab_t.append(_lab_t)
 
-        batch_t = [torch.LongTensor(self.pad_vector(i, max(target_len))) for i in batch_t]
-        batch_o_t = [torch.LongTensor(self.pad_vector(i, max(target_len))) for i in batch_o_t]
-        if self.dec_type == 'pt':
-            batch_f_t = [torch.LongTensor(self.pad_vector(i, max(target_len))) for i in batch_f_t]
-            batch_pf_t = [torch.LongTensor(self.pad_vector(i, max(target_len))) for i in batch_pf_t]
-            batch_pb_t = [torch.LongTensor(self.pad_vector(i, max(target_len))) for i in batch_pb_t]
-            batch_lab_t = [torch.LongTensor(self.pad_vector(i, max(target_len))) for i in batch_lab_t]
+            # print("_summary ({}): {}".format(len(_summary), _summary))
+            # print("_o_summary ({}): {}".format(len(_o_summary), _o_summary))
+            assert len(_summary) == len(_o_summary) == sum_len
+            batch_sum.append(_summary)
+            batch_o_sum.append(_o_summary)
 
-        batch_s = torch.stack(batch_s, dim=0)
-        batch_f = torch.stack(batch_f, dim=0)
-        batch_pf = torch.stack(batch_pf, dim=0)
-        batch_pb = torch.stack(batch_pb, dim=0)
-        batch_o_s = torch.stack(batch_o_s, dim=0)
+        # ----------------------- convert to list of tensors and pad to max length ------------------------- #
+        batch_s = torch.stack([torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_s], dim=0)
+        batch_o_s = torch.stack([torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_o_s], dim=0)
+        batch_f = torch.stack([torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_f], dim=0)
+        batch_pf = torch.stack([torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_pf], dim=0)
+        batch_pb = torch.stack([torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_pb], dim=0)
 
-        batch_o_t = torch.stack(batch_o_t, dim=0)
-        batch_t = torch.stack(batch_t, dim=0)
-        if self.dec_type == 'pt':
-            batch_f_t = torch.stack(batch_f_t, dim=0)
-            batch_pf_t = torch.stack(batch_pf_t, dim=0)
-            batch_pb_t = torch.stack(batch_pb_t, dim=0)
-            batch_lab_t = torch.stack(batch_lab_t, dim=0)
-            batch_t = (batch_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t)  # NOTE: batch_t is now a tuple
+        source_package = (batch_s, batch_o_s, batch_f, batch_pf, batch_pb)
 
-        if self.data_src != 'train':
-            targets = [i[:max(target_len)-2] for i in targets]
-            sources = [i[:max(source_len)] for i in sources]
-            fields = [i[:max(source_len)] for i in fields]
-            if self.dec_type == 'pt':
-                rcds = [i[:max(source_len)] for i in rcds]
-                has = [i[:max(source_len)] for i in has]
-                fields = {'fields': fields, 'rcds': rcds, 'has': has}
-            return batch_s, batch_o_s, batch_t, batch_o_t, batch_f, batch_pf, batch_pb, source_len, max_source_oov, \
-                   w2fs, targets, sources, fields, list_oovs
+        if self.dec_type in ['pt', 'prn']:
+            batch_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_t], dim=0)
+            batch_o_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_o_t], dim=0)
+            batch_f_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_f_t], dim=0)
+            batch_pf_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_pf_t], dim=0)
+            batch_pb_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_pb_t], dim=0)
+            batch_lab_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_lab_t], dim=0)
+
+            outline_package = [batch_t, batch_o_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t]
         else:
-            return batch_s, batch_o_s, batch_t, batch_o_t, batch_f, batch_pf, batch_pb, source_len, max_source_oov
+            outline_package = None
+
+        if self.dec_type != 'pt':
+            batch_sum = torch.stack([torch.LongTensor(self.pad_vector(i, max(summary_len))) for i in batch_sum], dim=0)
+            batch_o_sum = torch.stack([torch.LongTensor(self.pad_vector(i, max(summary_len))) for i in batch_o_sum], dim=0)
+
+            summary_package = (batch_sum, batch_o_sum)
+        else:
+            summary_package = None
+
+        sources = [i[:max(source_len)] for i in sources]
+        fields = [i[:max(source_len)] for i in fields]
+        rcds = [i[:max(source_len)] for i in rcds]
+        has = [i[:max(source_len)] for i in has]
+        fields = {'fields': fields, 'rcds': rcds, 'has': has}
+        outlines = [i[:max(outline_len)-2] for i in outlines]
+        summaries = [i[:max(summary_len) - 2] for i in summaries]
+
+        texts_package = [sources, fields, summaries, outlines]
+
+        remaining = [source_len, max_tail_oov, w2fs, list_oovs]
+
+        return source_package, outline_package, summary_package, texts_package, remaining
+
+    def dump_to_device(self, data_packages):
+        return [[t.to(self.device) for t in pkg] if pkg is not None else None for pkg in data_packages]
 
     def get_batch(self, index):
-        if self.data_src == 'train':
-            batch_s, batch_o_s, batch_t, batch_o_t, batch_f, batch_pf, batch_pb, source_len, max_source_oov \
-                = self.corpus[index]
-        else:
-            batch_s, batch_o_s, batch_t, batch_o_t, batch_f, batch_pf, batch_pb, source_len, max_source_oov, \
-            w2fs, targets, sources, fields, list_oovs = self.corpus[index]
 
-        batch_s = batch_s.to(self.device)
-        batch_o_s = batch_o_s.to(self.device)
-        if self.dec_type == 'pt':
-            batch_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t = batch_t
-            batch_t = batch_t.to(self.device)
-            batch_f_t = batch_f_t.to(self.device)
-            batch_pf_t = batch_pf_t.to(self.device)
-            batch_pb_t = batch_pb_t.to(self.device)
-            batch_lab_t = batch_lab_t.to(self.device)
-            batch_t = (batch_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t)  # NOTE: batch_t is now a tuple
-            # batch_t = (batch_t, batch_f_t, batch_lab_t)  # NOTE: batch_t is now a tuple
-        else:
-            batch_t = batch_t.to(self.device)
+        source_package, outline_package, summary_package, texts_package, remaining = self.corpus[index]
 
-        batch_o_t = batch_o_t.to(self.device)
-        batch_f = batch_f.to(self.device)
-        batch_pf = batch_pf.to(self.device)
-        batch_pb = batch_pb.to(self.device)
+        data_packages = [source_package, outline_package, summary_package]
 
-        if self.data_src == 'train':
-            return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_t, batch_o_t, source_len, max_source_oov
-        else:
-            return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_t, batch_o_t, source_len, max_source_oov, \
-                   w2fs, sources, targets, fields, list_oovs
+        data_packages = self.dump_to_device(data_packages)
+
+        return data_packages, texts_package, remaining
+
+        # batch_s, batch_o_s, batch_f, batch_f, batch_pf, batch_pb = source_package
+        # batch_t, batch_o_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t = outline_package
+        # batch_sum, batch_o_sum = summary_package
+        # source_len, max_tail_oov, w2fs, list_oovs, sources, fields, summaries, outlines = others
+        #
+        #
+        # if self.data_src == 'train':
+        #     return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_t, batch_o_t, source_len, max_tail_oov
+        # else:
+        #     return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_t, batch_o_t, source_len, max_tail_oov, \
+        #            w2fs, sources, targets, fields, list_oovs
 
