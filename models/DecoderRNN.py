@@ -12,7 +12,7 @@ class DecoderRNN(BaseRNN):
 
     def __init__(self, dec_type='pg', ptr_input='emb', ptr_feat_merge='mlp',
                  vocab_size=0, embedding=None, embed_size=0, hidden_size=0, fdsize=0, posit_size=0,
-                 sos_id=3, eos_id=2, unk_id=1,
+                 pad_id=0, sos_id=1, eos_id=2, unk_id=3,
                  rnn_cell='gru', directions=2,
                  attn_src='emb', attn_type='cat', attn_fuse='sum', attn_level=2,
                  ptr_dec_feat=False,
@@ -45,6 +45,7 @@ class DecoderRNN(BaseRNN):
         self.eos_id = eos_id
         self.sos_id = sos_id
         self.unk_id = unk_id
+        self.pad_id = pad_id
         self.mask = mask
         self.unk_gen = unk_gen
         self.embedding = embedding
@@ -608,7 +609,7 @@ class DecoderRNN(BaseRNN):
             #     targets, f_t, lab_t = targets
 
             lm_loss, cov_loss = [], []
-            dec_lens = (targets > 0).float().sum(1)
+            dec_lens = (targets > self.pad_id).float().sum(1)-1  # minus <SOS>
 
             if self.decoder_type == 'pt':
                 no_dup_mask = np.zeros((batch_size, max_enc_len), dtype=np.float32)
@@ -660,7 +661,7 @@ class DecoderRNN(BaseRNN):
                                                                      enc_hidden_vals, enc_input_vals, enc_field_vals,
                                                                      no_dup_mask=no_dup_mask_tensor)
 
-                target_mask_0 = target_id.eq(0).detach()
+                target_mask_0 = target_id.eq(self.pad_id).detach()  # non-padding tokens
 
                 if self.decoder_type == 'pg':
                     combined_vocab = logits_or_probs
@@ -681,7 +682,7 @@ class DecoderRNN(BaseRNN):
                 else:
                     if self.decoder_type == 'pt':
                         target_id = lab_t[:, step + 1].unsqueeze(1)  # 0th is <SOS>, [batch] of ids of next word
-                        target_mask_0 = target_id.eq(0).squeeze(1).detach()
+                        target_mask_0 = target_id.eq(self.pad_id).squeeze(1).detach()
 
                     logits = logits_or_probs
                     # print('logits: {}'.format(logits.size()))
@@ -728,7 +729,7 @@ class DecoderRNN(BaseRNN):
 
         if self.decoder_type == 'pt':
             no_dup_mask = np.zeros((batch_size, max_enc_len), dtype=np.float32)
-            no_dup_mask[:, 0] = 1
+            no_dup_mask[:, 0] = 1  # start from making the 0th <SOS> token
 
             if self.ptr_input == 'hid':
                 tgt_indices = targets.unsqueeze(-1).expand(batch_size, 1, enc_hidden_vals.size(-1))
@@ -904,6 +905,7 @@ class DecoderRNN(BaseRNN):
             raise ValueError("Argument encoder_outputs cannot be None when attention is used.")
         else:
             max_enc_len = encoder_outputs.size(1)
+
         # inference batch size
         if targets is None and enc_state is None:
             batch_size = 1
@@ -938,6 +940,6 @@ class DecoderRNN(BaseRNN):
 
             max_length = self.max_length
         else:
-            max_length = targets.size(1) - 1     # minus the start of sequence symbol
+            max_length = targets.size(1) - 1     # minus the <SOS>
 
         return targets, batch_size, max_length, max_enc_len

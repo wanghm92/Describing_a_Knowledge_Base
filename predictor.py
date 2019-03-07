@@ -7,7 +7,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from tqdm import tqdm
 
 class Predictor(object):
-    def __init__(self, model, vocab, USE_CUDA, decoder_type='pg', unk_gen='False', dataset_type=0):
+    def __init__(self, model, vocab, USE_CUDA, decoder_type='pg', unk_gen='False', dataset_type=0, unk_id=3):
         device = torch.device("cuda" if USE_CUDA else "cpu")
         self.model = model.to(device)
         self.model.eval()
@@ -16,6 +16,7 @@ class Predictor(object):
         self.decoder_type = decoder_type
         self.unk_gen = unk_gen
         self.dataset_type = dataset_type
+        self.unk_id = unk_id
 
     def predict(self, batch_s, batch_o_s, batch_f, batch_pf, batch_pb, max_source_oov, source_len, list_oovs, w2fs):
         torch.set_grad_enabled(False)
@@ -94,7 +95,7 @@ class Predictor(object):
                     # get tokens and replace OOVs
                     symbol = decouts[j][k].item()
                     if symbol < self.vocab.size:
-                        if symbol == 1 and self.unk_gen:
+                        if symbol == self.unk_id and self.unk_gen:
                             replacement = sources[j][attns[j][k].argmax()]
                             out_seq_clean.append(replacement)
                         else:

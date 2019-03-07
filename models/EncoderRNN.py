@@ -6,6 +6,7 @@ from .baseRNN import BaseRNN
 
 class EncoderRNN(BaseRNN):
     def __init__(self, vocab_size=0, embedding=None,
+                 pad_id=0, sos_id=1, eos_id=2, unk_id=3,
                  hidden_size=0, posit_size=0, embed_size=0, fdsize=0, dec_size=0, attn_size=0,
                  attn_src='emb', dropout_p=0, n_layers=1, rnn_cell='gru', directions=2,
                  variable_lengths=True, field_cat_pos=False,
@@ -27,6 +28,9 @@ class EncoderRNN(BaseRNN):
         self.enc_type = enc_type
         self.dec_size = dec_size
         self.attn_size = attn_size
+        self.eos_id = eos_id
+        self.unk_id = unk_id
+
         self.input_size = self.embed_size + self.fdsize + self.posit_size
 
         if self.enc_type == 'fc':
@@ -36,21 +40,19 @@ class EncoderRNN(BaseRNN):
                 self.attn_linear = nn.Linear(self.attn_size, self.attn_size, bias=False)
             self.linear_out = nn.Linear(self.dec_size*2, self.dec_size, bias=False)
             self.softmax = nn.Softmax(dim=2)
-        elif self.enc_type == 'rnn':
+        else:
             self.rnn = self.rnn_cell(self.input_size,
                                      self.hidden_size,
                                      n_layers,
                                      batch_first=True,
                                      bidirectional=(directions == 2),
                                      dropout=self.dropout_p)
-        else:
-            raise ValueError("{} enc_type is not supported".format(enc_type))
 
     def forward(self, batch_s, batch_f, batch_pf, batch_pb, input_lengths=None):
 
         # get mask for location of PAD
-        enc_mask = batch_s.eq(0).detach()
-        enc_non_stop_mask = batch_s.eq(2).detach()
+        enc_mask = batch_s.lt(self.unk_id).detach()
+        enc_non_stop_mask = batch_s.eq(self.eos_id).detach()
 
         embed_input = self.embedding(batch_s)
         if self.field_embedding is not None:

@@ -114,7 +114,7 @@ class Vocabulary:
         self.rcd_vocab = Counter(rcd_vocab)
 
     def _build_luts(self, vocab):
-        tk2idx = {'<PAD>': 0, '<UNK>': 1, '<EOS>': 2, '<SOS>': 3}
+        tk2idx = {'<PAD>': 0, '<SOS>': 1, '<EOS>': 2, '<UNK>': 3}
         offset = len(tk2idx)
         for idx, word in enumerate(vocab):
             tk2idx[word] = idx + offset
@@ -130,7 +130,7 @@ class Vocabulary:
         # record type idx
         self.rcd2idx, self.idx2rcd = self._build_luts(self.rcd_vocab)
         # home/away idx
-        self.ha2idx = {'<PAD>': 0, '<UNK>': 1, '<EOS>': 2, '<SOS>': 3, 'HOME': 4, 'AWAY':5}
+        self.ha2idx = {'<PAD>': 0, '<SOS>': 1, '<EOS>': 2, '<UNK>': 3, 'HOME': 4, 'AWAY': 5}
         self.idx2ha = {idx: h for h, idx in self.ha2idx.items()}
 
     def add_start_end(self, vector, item2idx=None):
@@ -479,6 +479,12 @@ class Table2text_seq:
         vector.extend([0] * padding)
         return vector
 
+    def pad_vec_rev(self, vector, maxlen):
+        vector = vector[::-1][1:-1]
+        padding = maxlen - len(vector)
+        vector.extend([0] * padding)
+        return vector
+
     def vectorize(self, sample):
         """
             batch_s         --> tensor batch of table with ids
@@ -535,7 +541,7 @@ class Table2text_seq:
             _fields_t = self.vocab.vectorize_feature(field_t, ft_type='field')
             _rcd_t = self.vocab.vectorize_feature(rcd_t, ft_type='rcd')
             _ha_t = self.vocab.vectorize_feature(ha_t, ft_type='ha')
-            _lab_t = [0] + lab_t + [src_len-1]
+            _lab_t = [0] + lab_t + [src_len-1]  # start from copying the 0th <SOS> token
 
             # ----------------------- summary word to ids ------------------------- #
             if self.dec_type == 'pg':
@@ -597,17 +603,17 @@ class Table2text_seq:
 
             assert len(_outline) == len(_fields_t) == len(_rcd_t) == len(_ha_t) == len(_lab_t) == len(_o_outline) == otl_len
             batch_t.append(_outline)
-            batch_o_t.append(_outline)  # for scatter add
             batch_f_t.append(_fields_t)
             batch_pf_t.append(_rcd_t)
             batch_pb_t.append(_ha_t)
-            batch_lab_t.append(_lab_t)
+            batch_o_t.append(_outline)  # for scatter add attn weights
+            batch_lab_t.append(_lab_t)  # for CrossEntropyLoss
 
             # print("_summary ({}): {}".format(len(_summary), _summary))
             # print("_o_summary ({}): {}".format(len(_o_summary), _o_summary))
             assert len(_summary) == len(_o_summary) == sum_len
             batch_sum.append(_summary)
-            batch_o_sum.append(_o_summary)
+            batch_o_sum.append(_o_summary)  # for gather NLL loss
 
         # ----------------------- convert to list of tensors and pad to max length ------------------------- #
         batch_s = torch.stack([torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_s], dim=0)
@@ -627,6 +633,15 @@ class Table2text_seq:
             batch_lab_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_lab_t], dim=0)
 
             outline_package = [batch_t, batch_o_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t]
+            # if self.dec_type == 'prn':
+            #     batch_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_t], dim=0)  # for emb lookup
+            #     batch_o_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_o_t], dim=0)  # for scatter add attn weights
+            #     batch_f_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_f_t], dim=0)
+            #     batch_pf_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_pf_t], dim=0)
+            #     batch_pb_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_pb_t], dim=0)
+            #     outline_pkg_rev = [batch_t_r, batch_o_t_r, batch_f_t_r, batch_pf_t_r, batch_pb_t_r]
+            # else:
+            outline_pkg_rev = None
         else:
             outline_package = None
 
@@ -644,22 +659,22 @@ class Table2text_seq:
         has = [i[:max(source_len)] for i in has]
         fields = {'fields': fields, 'rcds': rcds, 'has': has}
         outlines = [i[:max(outline_len)-2] for i in outlines]
-        summaries = [i[:max(summary_len) - 2] for i in summaries]
+        summaries = [i[:max(summary_len)-2] for i in summaries]
 
         texts_package = [sources, fields, summaries, outlines]
 
-        remaining = [source_len, max_tail_oov, w2fs, list_oovs]
+        remaining = [source_len, outline_len, summary_len, max_tail_oov, w2fs, list_oovs]
 
-        return source_package, outline_package, summary_package, texts_package, remaining
+        return source_package, outline_package, outline_pkg_rev, summary_package, texts_package, remaining
 
     def dump_to_device(self, data_packages):
         return [[t.to(self.device) for t in pkg] if pkg is not None else None for pkg in data_packages]
 
     def get_batch(self, index):
 
-        source_package, outline_package, summary_package, texts_package, remaining = self.corpus[index]
+        source_package, outline_package, outline_pkg_rev, summary_package, texts_package, remaining = self.corpus[index]
 
-        data_packages = [source_package, outline_package, summary_package]
+        data_packages = [source_package, outline_package, outline_pkg_rev, summary_package]
 
         data_packages = self.dump_to_device(data_packages)
 
