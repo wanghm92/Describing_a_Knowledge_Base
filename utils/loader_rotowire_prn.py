@@ -17,10 +17,15 @@ class Vocabulary:
                  field=None, corpus=None,
                  start_end_tokens=True,
                  max_words=20000,
-                 min_frequency=5, min_frequency_field=0, min_frequency_rcd=0,
+                 min_frequency=3, min_frequency_field=0, min_frequency_rcd=0,
+                 pad_id=0, sos_id=1, eos_id=2, unk_id=3,
                  dec_type='pt'):
 
-        self.dec_type =dec_type
+        self.dec_type = dec_type
+        self.pad_id = pad_id
+        self.sos_id = sos_id
+        self.eos_id = eos_id
+        self.unk_id = unk_id
 
         if corpus is None:
             self.word2idx = word2idx
@@ -239,7 +244,7 @@ class Vocabulary:
 
 class Table2text_seq:
     def __init__(self, data_src, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available(),
-                 train_mode=0, dec_type='pg'):
+                 train_mode=False, dec_type='pg'):
         # TODO: change the path
         prefix = "{}/table2text_nlg/data/dkb/rotowire_prn/".format(HOME)
 
@@ -271,7 +276,7 @@ class Table2text_seq:
 
         # ----------------------- load triples and build vocabulary ------------------------- #
         self.prepare_content_metrics()
-        if data_src == 'train' and (train_mode != 0 and train_mode != 1):  # training(0) and resume training(1)
+        if data_src == 'train' and not train_mode:
             self.load_vocab(path)
         else:
             self.data = self.load_data(path)
@@ -414,20 +419,22 @@ class Table2text_seq:
             # print("ha_t: \n{}".format(ha_t))
             # print("lab_t: \n{}".format(lab_t))
             # print("summary: \n{}".format(summary))
-
             outline = (value_t, field_t, rcd_t, ha_t, lab_t)
             total.append(value_s + value_t + summary)
             total_field.append(field_s + field_t)
             total_rcd.append(rcd_s + rcd_t)
             samples.append([value_s, outline, field_s, rcd_s, ha_s, table, summary])
 
+            # print("total: \n{}".format(total))
+
         '''
             torch.nn.utils.rnn.pack_padded_sequence requires the sequence lengths sorted in decreasing order
         '''
         print("sorting samples ...")
-        self.sort_indices = np.argsort([len(x[0]) for x in samples]).tolist()
-        # self.sort_indices = np.argsort([len(x[1][0]) for x in samples]).tolist()
-        self.sort_indices.reverse()
+        # self.sort_indices = list(range(len(samples)))
+        # self.sort_indices = np.argsort([len(x[0]) for x in samples]).tolist()
+        self.sort_indices = np.argsort([len(x[1][0]) for x in samples]).tolist()  # increasing length
+        self.sort_indices.reverse()  # decreasing length
         samples = np.array(samples)[self.sort_indices].tolist()
 
         vocab_path_pkl = "{}/rotowire_vocab_pt.pkl".format(prefix)
@@ -503,7 +510,7 @@ class Table2text_seq:
         batch_sum, batch_o_sum = [], []
         source_len, outline_len, summary_len, w2fs = [], [], [], []
         sources, fields, rcds, has, outlines, summaries = [], [], [], [], [], []
-        list_oovs = []
+        batch_idx2oov = []
         max_tail_oov = 0
         for data in sample:
             # print("data: {}".format(data))
@@ -566,12 +573,12 @@ class Table2text_seq:
                 tail_oov_vocab = tail_oov_vocab.items()
                 if max_tail_oov < len(tail_oov_vocab):
                     max_tail_oov = len(tail_oov_vocab)
-                idx2word_oov = {idx: word for word, idx in tail_oov_vocab}
-                # w2f = {(idx+self.vocab.size): self.vocab.word2idx['<UNK>'] for word, idx in tail_oov_vocab}
-                w2f = {(idx + self.vocab.size): self.vocab.word2idx.get(table[word], self.vocab.word2idx['<UNK>'])
-                       for word, idx in tail_oov_vocab}
+                idx2oov = {idx: word for word, idx in tail_oov_vocab}
+                w2f = {(idx+self.vocab.size): self.vocab.word2idx['<UNK>'] for word, idx in tail_oov_vocab}
+                # w2f = {(idx + self.vocab.size): self.vocab.word2idx.get(table[word], self.vocab.word2idx['<UNK>'])
+                #        for word, idx in tail_oov_vocab}
                 w2fs.append(w2f)
-                list_oovs.append(idx2word_oov)
+                batch_idx2oov.append(idx2oov)
 
             if self.data_src != 'train':
                 sources.append(source)
@@ -660,10 +667,11 @@ class Table2text_seq:
         fields = {'fields': fields, 'rcds': rcds, 'has': has}
         outlines = [i[:max(outline_len)-2] for i in outlines]
         summaries = [i[:max(summary_len)-2] for i in summaries]
+        outline_len = [x-1 for x in outline_len]  # minus the <EOS> token for passing to encoder_otl
 
         texts_package = [sources, fields, summaries, outlines]
 
-        remaining = [source_len, outline_len, summary_len, max_tail_oov, w2fs, list_oovs]
+        remaining = [source_len, outline_len, summary_len, max_tail_oov, w2fs, batch_idx2oov]
 
         return source_package, outline_package, outline_pkg_rev, summary_package, texts_package, remaining
 

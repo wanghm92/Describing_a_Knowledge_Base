@@ -2,11 +2,13 @@ import torch.nn as nn
 import torch
 import sys
 from .baseRNN import BaseRNN
+import numpy as np
+np.set_printoptions(threshold=sys.maxsize)
 
 
 class EncoderRNN(BaseRNN):
     def __init__(self, vocab_size=0, embedding=None,
-                 pad_id=0, sos_id=1, eos_id=2, unk_id=3,
+                 eos_id=2, mask_id=1,
                  hidden_size=0, posit_size=0, embed_size=0, fdsize=0, dec_size=0, attn_size=0,
                  attn_src='emb', dropout_p=0, n_layers=1, rnn_cell='gru', directions=2,
                  variable_lengths=True, field_cat_pos=False,
@@ -29,7 +31,7 @@ class EncoderRNN(BaseRNN):
         self.dec_size = dec_size
         self.attn_size = attn_size
         self.eos_id = eos_id
-        self.unk_id = unk_id
+        self.mask_id = mask_id
 
         self.input_size = self.embed_size + self.fdsize + self.posit_size
 
@@ -51,7 +53,8 @@ class EncoderRNN(BaseRNN):
     def forward(self, batch_s, batch_f, batch_pf, batch_pb, input_lengths=None):
 
         # get mask for location of PAD
-        enc_mask = batch_s.lt(self.unk_id).detach()
+        # print('batch_s: {}'.format(batch_s))
+        enc_mask = batch_s.lt(self.mask_id).detach()
         enc_non_stop_mask = batch_s.eq(self.eos_id).detach()
 
         embed_input = self.embedding(batch_s)
@@ -81,6 +84,7 @@ class EncoderRNN(BaseRNN):
             else:
                 enc_outputs, _ = nn.utils.rnn.pad_packed_sequence(enc_hidden, batch_first=True)
                 enc_outputs = enc_outputs.contiguous()
+
         elif self.enc_type == 'fc':
             batch, sourceL, dim = embedded.size()
             mask = enc_mask.unsqueeze(1)

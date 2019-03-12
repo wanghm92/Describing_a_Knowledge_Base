@@ -54,10 +54,12 @@ class ConfigRotowire(object):
         self.valid_batch = 64
         self.dropout = 0.3
         self.directions = 1
+        self.enc_otl_dir = 2
         self.max_grad_norm = 5
         self.max_len = 80
         self.min_len = 35
         self.unk_gen = True  # allow generating UNK
+        self.scheduler = 'exp'
 
 class ConfigRotowire_bk(object):
     def __init__(self):

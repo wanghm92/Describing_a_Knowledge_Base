@@ -14,22 +14,25 @@ class Validator(object):
         """ Run forward pass on valid set"""
 
         data_packages, _, remaining = self.v_dataset.get_batch(batch_idx)
-        source_len = remaining[0]
-        losses = self.model(data_packages, remaining, teacher_forcing_ratio=self.teacher_forcing_ratio)
-        batch_loss = losses.mean()
-        return batch_loss.item(), len(source_len)
+        mean_batch_loss = self.model(data_packages, remaining, teacher_forcing_ratio=self.teacher_forcing_ratio)
+        # TODO:
+            # (1) use weighting factor
+            # (2) return and log two losses
+        if isinstance(mean_batch_loss, tuple):
+            mean_batch_loss = mean_batch_loss[0] + mean_batch_loss[1]
+        return mean_batch_loss.item(), len(remaining[0])
 
     def valid(self):
         torch.set_grad_enabled(False)
 
         valid_loss = 0.0
-        total_batches = len(self.v_dataset.corpus)
-        epoch_examples_total = self.v_dataset.len
+        num_valid_batch = len(self.v_dataset.corpus)
+        num_valid_expls = self.v_dataset.len
 
-        print("{} batches to be evaluated".format(total_batches))
-        for batch_idx in tqdm(range(total_batches)):
-            loss, num_examples = self.valid_batch(batch_idx)
-            valid_loss += loss * num_examples
-        valid_loss /= epoch_examples_total
+        print("{} batches to be evaluated".format(num_valid_batch))
+        for batch_idx in tqdm(range(num_valid_batch)):
+            mean_batch_loss, batch_size = self.valid_batch(batch_idx)
+            valid_loss += mean_batch_loss*batch_size
+        valid_loss /= num_valid_expls
 
         return valid_loss

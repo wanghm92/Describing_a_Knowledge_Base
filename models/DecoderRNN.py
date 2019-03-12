@@ -20,7 +20,7 @@ class DecoderRNN(BaseRNN):
                  field_self_att=False, field_cat_pos=False, field_context=False, context_mlp=False,
                  mask=False, use_cuda=True, unk_gen=False,
                  n_layers=1, dropout_p=0, max_len=100, min_len=20, lmbda=1.5,
-                 field_embedding=None, pos_embedding=None, dataset_type=0):
+                 field_embedding=None, pos_embedding=None, enc_type='rnn'):
         self.rnn_type = rnn_cell.lower()
         super(DecoderRNN, self).__init__(vocab_size, hidden_size, dropout_p, n_layers)
 
@@ -50,9 +50,9 @@ class DecoderRNN(BaseRNN):
         self.unk_gen = unk_gen
         self.embedding = embedding
         self.field_embedding = field_embedding
-        self.dataset_type = dataset_type
+        self.enc_type = enc_type
         self.ptr_dec_feat = ptr_dec_feat
-        if self.dataset_type == 3:
+        if self.enc_type == 'fc':
             self.pos_embedding, self.rpos_embedding = pos_embedding
         else:
             self.pos_embedding = pos_embedding
@@ -121,7 +121,7 @@ class DecoderRNN(BaseRNN):
         # ----------------- params for encoder memory keys ----------------- #
 
         enc_hidden_size = hidden_size * self.directions
-        if self.dataset_type != 3:
+        if self.enc_type == 'rnn':
             self.Wf = nn.Linear(field_input_size, hidden_size)
             if self.attn_level == 3:
                 self.We = nn.Linear(embed_size, hidden_size)  # e_t: word embeddings to keys
@@ -554,6 +554,9 @@ class DecoderRNN(BaseRNN):
 
                 # scatter article word probs to combined vocab prob.
                 src_prob = combined_vocab.gather(1, input_ids)
+
+                # print('input_ids: {}'.format(input_ids.size()))
+                # print('weighted_attn: {}'.format(weighted_attn.size()))
                 combined_vocab = combined_vocab.scatter_add(1, input_ids, weighted_attn)
                 # print('combined_vocab: {}'.format(combined_vocab.size()))
                 return combined_vocab, attn_weights, (p_gen, src_prob)
@@ -588,7 +591,8 @@ class DecoderRNN(BaseRNN):
             coverage = None
             # coverage_norm = None
 
-        if self.dataset_type != 3:
+        # print('enc_hidden: {}'.format(enc_hidden.size()))
+        if self.enc_type == 'rnn':
             enc_hidden_keys, enc_input_keys, enc_field_keys = \
                 self._get_enc_keys(enc_hidden, enc_input, enc_field, batch_size, max_enc_len)
         else:
@@ -615,7 +619,6 @@ class DecoderRNN(BaseRNN):
                 no_dup_mask = np.zeros((batch_size, max_enc_len), dtype=np.float32)
 
                 # print('targets: {}'.format(targets.size()))
-                # print('enc_hidden: {}'.format(enc_hidden.size()))
                 # print('lab_t: {}'.format(lab_t.size()))
                 # print('lab_t: {}'.format(lab_t))
                 if self.ptr_input == 'hid':
@@ -638,6 +641,8 @@ class DecoderRNN(BaseRNN):
             # print('embedded: {}'.format(embedded.size()))
             decoder_inputs = embedded
 
+            # print('decoder_inputs: {}'.format(decoder_inputs.size()))
+            # print('decoder_hidden_init: {}'.format(decoder_hidden_init.size()))
             hidden, _ = self.rnn(decoder_inputs, decoder_hidden_init)
 
             # step through decoder hidden states
@@ -650,6 +655,8 @@ class DecoderRNN(BaseRNN):
                     for x, y in zip(range(batch_size), target_id_prev.tolist()):
                         no_dup_mask[x][y] = 1
                     no_dup_mask_tensor = torch.from_numpy(no_dup_mask).cuda()
+                else:
+                    no_dup_mask_tensor = None
 
                 dec_hidden = hidden[:, step, :]
                 decoder_input = decoder_inputs[:, step, :]
@@ -691,15 +698,16 @@ class DecoderRNN(BaseRNN):
 
                     _lm_loss.masked_fill_(target_mask_0.data.byte(), 0)
                     _lm_loss = _lm_loss.unsqueeze(1)
+                    # print('_lm_loss: {}'.format(_lm_loss.size()))
 
                 lm_loss.append(_lm_loss)
 
             # NOTE: loss is normalized by length, use sum of loss leads to faster conversion
             # total_masked_loss = torch.cat(lm_loss, 1).sum(1).div(dec_lens)
-            total_masked_loss = torch.cat(lm_loss, 1).sum(1).mean()  # sum over tgt length
+            total_masked_loss = torch.cat(lm_loss, 1).sum(1).mean()  # sum over tgt length, mean over batch
             # print('total_masked_loss: {}'.format(total_masked_loss.size()))
-
             if self.use_cov_loss:
+                # TODO: change coverage loss to be the same as nll loss ???
                 total_masked_loss = total_masked_loss + self.lmbda * torch.stack(cov_loss, 1).sum(1).div(dec_lens)
 
             return total_masked_loss
@@ -724,8 +732,7 @@ class DecoderRNN(BaseRNN):
         locations = [] if self.decoder_type == 'pt' else None
         src_probs = [] if self.decoder_type == 'pg' else None
         p_gens = [] if self.decoder_type == 'pg' else None
-        if fig:
-            attn = []
+        attn = []
 
         if self.decoder_type == 'pt':
             no_dup_mask = np.zeros((batch_size, max_enc_len), dtype=np.float32)
@@ -757,8 +764,9 @@ class DecoderRNN(BaseRNN):
         for step in range(max_length):
             dec_hidden, _c = self.rnn(decoder_input, decoder_hidden_init)
 
-            if self.decoder_type == 'pt':
-                no_dup_mask_tensor = torch.from_numpy(no_dup_mask).cuda()
+
+            # TODO: needed for pg ?
+            no_dup_mask_tensor = torch.from_numpy(no_dup_mask).cuda() if self.decoder_type == 'pt' else None
 
             logits_or_prob, attn_weights, (p_gen, src_prob) = self._decode_step(batch_size, input_ids, coverage,
                                                                                 max_tail_oov,
@@ -778,18 +786,18 @@ class DecoderRNN(BaseRNN):
             else:
                 vocab_probs = logits_or_prob
 
-            if not self.unk_gen:
+            if self.decoder_type != 'pt' and not self.unk_gen:
                 vocab_probs[:, self.unk_id] = 0  # NOTE: not allow decoder to output UNK
 
-            if step < self.min_length:
+            if self.decoder_type == 'pt' and step < self.min_length:
                 vocab_probs.masked_fill_(enc_non_stop_mask.data.byte(), 0.0)
-            # vocab_probs.masked_fill_(no_dup_mask_tensor.data.byte(), 0.0)
 
             probs, symbols_or_positions = vocab_probs.topk(1)  # greedy decoding: get word indices and probs
 
             # accumulate used positions
-            for x, y in zip(range(batch_size), symbols_or_positions.squeeze(-1).tolist()):
-                no_dup_mask[x][y] = 1
+            if self.decoder_type == 'pt':
+                for x, y in zip(range(batch_size), symbols_or_positions.squeeze(-1).tolist()):
+                    no_dup_mask[x][y] = 1
 
             if self.decoder_type == 'pt':
                 # print('input_ids: {}'.format(input_ids.size()))
@@ -806,8 +814,7 @@ class DecoderRNN(BaseRNN):
                         tmp_mask[i][pos] = 1
                 enc_mask = torch.where(enc_mask > tmp_mask, enc_mask, tmp_mask)
 
-            if fig:
-                attn.append(attn_weights)
+            attn.append(attn_weights)
             decoded_outputs.append(symbols.clone())
             eos_batch = symbols.data.eq(self.eos_id)
             if eos_batch.dim() > 0:
@@ -862,7 +869,7 @@ class DecoderRNN(BaseRNN):
                 src_probs.append(src_prob)
 
             # check if all samples finished at the eos token
-            finished_step = np.logical_not(np.array(target_mask_step, dtype=bool))
+            finished_step = np.logical_not(np.array(target_mask_step.cpu(), dtype=bool))
             finished = np.logical_or(finished, finished_step)
             # stop if all finished
             if all(finished): break
@@ -872,12 +879,9 @@ class DecoderRNN(BaseRNN):
 
         locations = torch.stack(locations, 1).squeeze(2) if locations is not None else None
         losses = torch.cat(losses)
-        if fig:
-            self_matrix = f_matrix if self.field_self_att else None
-            return torch.stack(decoded_outputs, 1).squeeze(2), locations, lengths.tolist(), losses.tolist(), p_gens, \
-                   self_matrix, torch.stack(attn, 1).squeeze(2)
-        else:
-            return torch.stack(decoded_outputs, 1).squeeze(2), locations, lengths.tolist(), losses.tolist(), p_gens
+        self_matrix = f_matrix if self.field_self_att and fig else None
+        return torch.stack(decoded_outputs, 1).squeeze(2), locations, lengths.tolist(), losses.tolist(), p_gens, \
+               self_matrix, torch.stack(attn, 1).squeeze(2)
 
     def _init_state(self, enc_state):
         """ Initialize the encoder hidden state. """

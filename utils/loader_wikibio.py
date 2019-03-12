@@ -140,7 +140,7 @@ class Vocabulary:
 
 class Table2text_seq:
     def __init__(self, data_src, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available(),
-                 train_mode=0, dec_type='pg'):
+                 train_mode=False, dec_type='pg'):
         prefix = "{}/table2text_nlg/data/dkb/wikibio_dataset/".format(HOME)
         assert type == 2
         self.vocab = None
@@ -168,8 +168,8 @@ class Table2text_seq:
             raise ValueError("Only train, valid, test data_srcs are supported")
 
         # ----------------------- load triples and build vocabulary ------------------------- #
-        if data_src == 'train' and (train_mode != 0 and train_mode != 1):  # training(0) and resume training(1)
-            self.data = self.load_data_light(path)
+        if data_src == 'train' and not train_mode:
+            self.load_data_light(path)
         else:
             self.data = self.load_data(path)
             self.len = len(self.data)
