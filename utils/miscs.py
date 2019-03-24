@@ -1,4 +1,5 @@
 
+import numpy as np
 DELIM = u"￨"
 
 def print_save_metrics(args, config, metrics, epoch, dataset, save_file_dir,
@@ -21,7 +22,8 @@ def print_save_metrics(args, config, metrics, epoch, dataset, save_file_dir,
         print('\n[{}] ref[1]: {}'.format(mdl, ref[1][0]))
         print('\n[{}] cand[1]: {}'.format(mdl, cand[1]))
 
-    cands_ids_original = [cands_ids[i + 1] for i in dataset.sort_indices] if cands_ids is not None else None
+    cands_ids_original = [cands_ids[i + 1] for i in np.argsort(dataset.sort_indices).tolist()] \
+        if cands_ids is not None else None
 
     file_ext = '{}.'.format(mdl) if len(mdl) > 0 else ''
     if save:
