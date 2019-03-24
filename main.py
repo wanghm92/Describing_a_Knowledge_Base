@@ -34,10 +34,6 @@ parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
 parser.add_argument('--cuda', action='store_false',
                     help='use CUDA')
-parser.add_argument('--dec_type', type=str, default='pg', choices=['pg', 'pt', 'seq', 'prn'],
-                    help='decoder model type pg(pointer-generator)/pt(pointer-net)(WIP)/seq(seq2seq)')
-parser.add_argument('--enc_type', type=str, default='rnn', choices=['rnn', 'fc', 'trans'],
-                    help='encoder model type')
 parser.add_argument('--save', type=str, default='params.pkl',
                     help='path to save the final model')
 parser.add_argument('--dataset', type=str, default='test', choices=['test', 'valid'],
@@ -51,6 +47,11 @@ parser.add_argument('--batch', type=int, default='64',
                     help='batch size')
 parser.add_argument('--max_len', type=int, default='100',
                     help='max_len')
+
+parser.add_argument('--dec_type', type=str, default='pg', choices=['pg', 'pt', 'seq', 'prn'],
+                    help='decoder model type pg(pointer-generator)/pt(pointer-net)(WIP)/seq(seq2seq)')
+parser.add_argument('--enc_type', type=str, default='rnn', choices=['rnn', 'fc', 'trans'],
+                    help='encoder model type')
 
 parser.add_argument('--attn_type', type=str, default='cat', choices=['cat', 'dot'],
                     help='type of attention score calculation: cat, dot')
@@ -226,14 +227,14 @@ def train(t_dataset, t4e_dataset, v_dataset, model, n_epochs, teacher_forcing_ra
             metrics.run_logger(writer=writer, epoch=epoch)
 
         elif isinstance(valid_results, dict):
-            for mdl, results in valid_results:
+            for mdl, results in valid_results.items():
                 cand, ref, valid_ppl, others = results
                 if epoch > 0:
                     L.info('[{}] Result:'.format(mdl))
                     L.info('[{}] valid_loss: {}'.format(mdl, valid_loss))
                     L.info('[{}] valid_ppl: {}'.format(mdl, valid_ppl))
-                    writer.add_scalar('[{}] perplexity/valid', mdl, valid_ppl, epoch)
-                    writer.add_scalar('[{}] output_len/valid', mdl, others[-1], epoch)
+                    writer.add_scalar('{}/perplexity/valid'.format(mdl), valid_ppl, epoch)
+                    writer.add_scalar('{}/output_len/valid'.format(mdl), others[-1], epoch)
                 valid_scores = print_save_metrics(args, config, metrics, epoch, v_dataset, save_file_dir,
                                                   cand, ref, others, live=True, mdl=mdl)
                 metrics.run_logger(writer=writer, epoch=epoch)
@@ -255,13 +256,13 @@ def train(t_dataset, t4e_dataset, v_dataset, model, n_epochs, teacher_forcing_ra
             metrics.run_logger(writer=writer, epoch=epoch, cat='train_metrics')
 
         elif isinstance(train_results, dict):
-            for mdl, results in train_results:
+            for mdl, results in train_results.items():
                 cand, ref, train_ppl, others = results
                 if epoch > 0:
                     L.info('[{}] Result:'.format(mdl))
                     L.info('[{}] train_ppl: {}'.format(mdl, train_ppl))
-                    writer.add_scalar('[{}] perplexity/train', mdl, train_ppl, epoch)
-                    writer.add_scalar('[{}] output_len/train', mdl, others[-1], epoch)
+                    writer.add_scalar('{}/perplexity/train'.format(mdl), train_ppl, epoch)
+                    writer.add_scalar('{}/output_len/train'.format(mdl), others[-1], epoch)
                 _ = print_save_metrics(args, config, metrics, epoch, t4e_dataset, save_file_dir,
                                        cand, ref, others, live=True, save=False)
                 metrics.run_logger(writer=writer, epoch=epoch, cat='train_metrics/{}'.format(mdl))

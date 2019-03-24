@@ -136,8 +136,9 @@ class Predictor(object):
             batch_s, batch_o_s, batch_f, batch_pf, batch_pb,\
             _, _,\
             _, _, \
-            _, outline_len, _, max_tail_oov, w2fs, batch_idx2oov = self.model.unpack_batch_data(data_packages, remaining)
+            _, outline_len, _, max_tail_oov, w2fs, _ = self.model.unpack_batch_data(data_packages, remaining)
             sources, fields, summaries, outlines = texts_package
+            batch_idx2oov = remaining[-1]
 
             # stage 1 decoding
             lab_t = data_packages[1][-1]
@@ -155,19 +156,21 @@ class Predictor(object):
                                                        planner_srcs, planner_feats, planner_ref,
                                                        batch_otls, None, None,
                                                        outline_ids, outline_tgt_ids,
-                                                       sources, fields, targets, None,
+                                                       sources, fields, targets, batch_idx2oov,
                                                        locations, lab_t,
                                                        fig, figs_per_batch, batch_pf, batch_idx, save_dir)
 
             # stage 2 decoding
 
             outline_len = [x - 1 for x in outline_len]
+            outline_len_sorted, sorted_idx = torch.from_numpy(np.array(outline_len)).to(self.device).sort(descending=True)
+            reverse_idx = sorted_idx.argsort()
             batch_otl_pos_tensor = self.pad_eos(batch_outline_positions, outline_len)
-            batch_t = (batch_s.gather(1, batch_otl_pos_tensor),
-                       batch_f.gather(1, batch_otl_pos_tensor),
-                       batch_pf.gather(1, batch_otl_pos_tensor),
-                       batch_pb.gather(1, batch_otl_pos_tensor))
-            batch_o_t = batch_o_s.gather(1, batch_otl_pos_tensor)
+            batch_t = (batch_s.gather(1, batch_otl_pos_tensor).index_select(0, sorted_idx),
+                       batch_f.gather(1, batch_otl_pos_tensor).index_select(0, sorted_idx),
+                       batch_pf.gather(1, batch_otl_pos_tensor).index_select(0, sorted_idx),
+                       batch_pb.gather(1, batch_otl_pos_tensor).index_select(0, sorted_idx))
+            batch_o_t = batch_o_s.gather(1, batch_otl_pos_tensor.index_select(0, sorted_idx))
 
             temp = copy.deepcopy(fields)
             for k, v in fields.items():
@@ -176,23 +179,31 @@ class Predictor(object):
             fields = temp
             targets = summaries
 
-            pred_summaries = self.model.cont_fn(batch_t, batch_o_t=batch_o_t,
-                                                max_tail_oov=max_tail_oov, outline_len=outline_len, w2fs=w2fs, fig=fig)
+            pred_summaries = self.model.cont_fn(batch_t, batch_o_t=batch_o_t, max_tail_oov=max_tail_oov,
+                                                outline_len=outline_len_sorted.tolist(), w2fs=w2fs, fig=fig)
 
             dec_outs, _, summary_lens, losses, p_gens, selfatt, attns = pred_summaries
+            dec_outs = torch.index_select(dec_outs, 0, reverse_idx)
+            # p_gens = torch.index_select(p_gens, 0, reverse_idx) if p_gens else None
+            p_gens_list = [p_gens[i, :] for i in reverse_idx.tolist()]
+            selfatt = [selfatt[i, :, :] for i in reverse_idx.tolist()] if selfatt else None
+            attns = [attns[i, :, :] for i in reverse_idx.tolist()] if selfatt else None
+            summary_lens = np.array(summary_lens)[reverse_idx.tolist()].tolist()
+            losses = np.array(losses)[reverse_idx.tolist()].tolist()
+
             token_count_sum += sum(summary_lens)
             realizer_loss += sum(losses)
 
             realizer_counter, realizer_srcs, realizer_feats, realizer_ref, \
             batch_sums, sums_with_pgens, sums_with_unks, \
             _, _, _ = self.parse_batch(realizer_counter,
-                                       summary_lens, dec_outs, p_gens, selfatt, attns,
+                                       summary_lens, dec_outs, p_gens_list, selfatt, attns,
                                        realizer_srcs, realizer_feats, realizer_ref,
                                        batch_sums, sums_with_pgens, sums_with_unks,
                                        None, None,
                                        outlines, fields, targets, batch_idx2oov,
                                        None, None,
-                                       fig, figs_per_batch, batch_t[2], batch_idx, save_dir)
+                                       fig, figs_per_batch, batch_t[2].index_select(0, reverse_idx), batch_idx, save_dir)
 
         # combine results from two stages
         others_1 = (None, None, outline_ids, outline_tgt_ids, planner_srcs, planner_feats, float(token_count_otl)/dataset.len)
@@ -256,9 +267,10 @@ class Predictor(object):
                     else:
                         out_seq_clean.append(self.vocab.idx2word[symbol])
                     out_seq_unk.append(self.vocab.idx2word[symbol])
-                # ptr-gen decoder
+                # pg decoder
                 else:
-                    oov = batch_idx2oov[j][symbol - self.vocab.size]
+                    oov_dict = batch_idx2oov[j]
+                    oov = oov_dict[symbol - self.vocab.size]
                     out_seq_clean.append(oov)
                     out_seq_unk.append(oov)
 

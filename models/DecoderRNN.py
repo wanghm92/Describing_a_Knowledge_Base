@@ -647,6 +647,7 @@ class DecoderRNN(BaseRNN):
 
             # step through decoder hidden states
             for step in range(max_length):
+                # TODO: TBPTT
                 target_id = targets_id[:, step+1].unsqueeze(1)  # 0th is <SOS>, [batch] of ids of next word
 
                 if self.decoder_type == 'pt':
@@ -823,6 +824,10 @@ class DecoderRNN(BaseRNN):
                 lengths[update_idx] = len(decoded_outputs)
             # replace oov with the corresponding field embedding
             if self.decoder_type == 'pg':
+                # print('symbols: {}'.format(symbols))
+                # print('w2fs: {}'.format(w2fs))
+                # print('w2fs: {}'.format(len(w2fs)))
+                # print('symbols: {}'.format(symbols.size()))
                 for i in range(symbols.size(0)):
                     w2f = w2fs[i]
                     if symbols[i].item() > self.vocab_size-1:
@@ -865,7 +870,7 @@ class DecoderRNN(BaseRNN):
             batch_loss = torch.masked_select(nll.squeeze(1), target_mask_step)
             losses.append(batch_loss)
             if self.decoder_type == 'pg':
-                p_gens.append(p_gen)
+                p_gens.append(p_gen.squeeze(1))
                 src_probs.append(src_prob)
 
             # check if all samples finished at the eos token
@@ -875,7 +880,7 @@ class DecoderRNN(BaseRNN):
             if all(finished): break
 
         if self.decoder_type == 'pg':
-            p_gens = torch.stack(p_gens, 1).squeeze(2)
+            p_gens = torch.stack(p_gens, 1)
 
         locations = torch.stack(locations, 1).squeeze(2) if locations is not None else None
         losses = torch.cat(losses)

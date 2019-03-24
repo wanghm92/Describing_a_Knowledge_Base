@@ -172,7 +172,7 @@ class Vocabulary:
                 _source.append(self.word2idx[word])
             except KeyError:
                 oov_freq += 1
-                if self.dec_type == 'pg':
+                if self.dec_type in ['pg', 'prn']:
                     if word not in _oov:
                         _o_source.append(cnt + self.size)
                         _oov[word] = cnt
@@ -551,10 +551,8 @@ class Table2text_seq:
             _lab_t = [0] + lab_t + [src_len-1]  # start from copying the 0th <SOS> token
 
             # ----------------------- summary word to ids ------------------------- #
-            if self.dec_type == 'pg':
+            if self.dec_type in ['pg', 'prn']:
                 tail_oov_vocab = source_oov
-            elif self.dec_type == 'prn':
-                tail_oov_vocab = outline_oov
             else:
                 tail_oov_vocab = None
 
@@ -569,16 +567,16 @@ class Table2text_seq:
             self.total_cnt_sum += len(_summary)
 
             # ----------------------- prepare for evaluation ------------------------- #
-            if tail_oov_vocab:
-                tail_oov_vocab = tail_oov_vocab.items()
-                if max_tail_oov < len(tail_oov_vocab):
-                    max_tail_oov = len(tail_oov_vocab)
-                idx2oov = {idx: word for word, idx in tail_oov_vocab}
-                w2f = {(idx+self.vocab.size): self.vocab.word2idx['<UNK>'] for word, idx in tail_oov_vocab}
-                # w2f = {(idx + self.vocab.size): self.vocab.word2idx.get(table[word], self.vocab.word2idx['<UNK>'])
-                #        for word, idx in tail_oov_vocab}
-                w2fs.append(w2f)
-                batch_idx2oov.append(idx2oov)
+            # if tail_oov_vocab:
+            tail_oov_vocab = tail_oov_vocab.items()
+            if max_tail_oov < len(tail_oov_vocab):
+                max_tail_oov = len(tail_oov_vocab)
+            idx2oov = {idx: word for word, idx in tail_oov_vocab}
+            w2f = {(idx+self.vocab.size): self.vocab.word2idx['<UNK>'] for word, idx in tail_oov_vocab}
+            # w2f = {(idx + self.vocab.size): self.vocab.word2idx.get(table[word], self.vocab.word2idx['<UNK>'])
+            #        for word, idx in tail_oov_vocab}
+            w2fs.append(w2f)
+            batch_idx2oov.append(idx2oov)
 
             if self.data_src != 'train':
                 sources.append(source)
