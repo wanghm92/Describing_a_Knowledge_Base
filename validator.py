@@ -10,14 +10,14 @@ class Validator(object):
         torch.set_grad_enabled(False)  # turn off gradient tracking
         self.v_dataset = v_dataset
 
-    def valid_batch(self, batch_idx):
+    def valid_batch(self, batch_idx, src='full'):
         """ Run forward pass on valid set"""
         data_packages, _, remaining = self.v_dataset.get_batch(batch_idx)
         batch_size = len(remaining[0])
-        batch_output = self.model(data_packages, remaining, forward_mode='valid')
+        batch_output = self.model(data_packages, remaining, forward_mode='valid', src=src)
         return batch_output, batch_size
 
-    def valid(self, epoch):
+    def valid(self, epoch, src='full'):
 
         if self.model.decoder_type == 'prn':
             valid_loss = {'prn-planner': 0.0, 'prn-realizer': 0.0}
@@ -29,7 +29,7 @@ class Validator(object):
 
         print("{} batches to be evaluated".format(num_valid_batch))
         for batch_idx in tqdm(range(num_valid_batch)):
-            batch_output, batch_size = self.valid_batch(batch_idx)
+            batch_output, batch_size = self.valid_batch(batch_idx, src=src)
 
             for mdl, outputs in batch_output.items():
                 mean_batch_loss, _ = outputs  # total_norm is ignored

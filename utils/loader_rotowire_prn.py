@@ -637,27 +637,27 @@ class Table2text_seq:
 
         source_package = (batch_s, batch_o_s, batch_f, batch_pf, batch_pb)
 
-        if self.dec_type in ['pt', 'prn']:
-            batch_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_t], dim=0)
-            batch_o_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_o_t], dim=0)
-            batch_f_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_f_t], dim=0)
-            batch_pf_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_pf_t], dim=0)
-            batch_pb_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_pb_t], dim=0)
-            batch_lab_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_lab_t], dim=0)
+        # if self.dec_type in ['pt', 'prn']:
+        batch_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_t], dim=0)
+        batch_o_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_o_t], dim=0)
+        batch_f_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_f_t], dim=0)
+        batch_pf_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_pf_t], dim=0)
+        batch_pb_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_pb_t], dim=0)
+        batch_lab_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_lab_t], dim=0)
 
-            outline_package = [batch_t, batch_o_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t]
-            # if self.dec_type == 'prn':
-            #     batch_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_t], dim=0)  # for emb lookup
-            #     batch_o_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_o_t], dim=0)  # for scatter add attn weights
-            #     batch_f_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_f_t], dim=0)
-            #     batch_pf_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_pf_t], dim=0)
-            #     batch_pb_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_pb_t], dim=0)
-            #     outline_pkg_rev = [batch_t_r, batch_o_t_r, batch_f_t_r, batch_pf_t_r, batch_pb_t_r]
-            # else:
-            outline_pkg_rev = None
-        else:
-            outline_pkg_rev = None
-            outline_package = None
+        outline_package = [batch_t, batch_o_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t]
+        # if self.dec_type == 'prn':
+        #     batch_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_t], dim=0)  # for emb lookup
+        #     batch_o_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_o_t], dim=0)  # for scatter add attn weights
+        #     batch_f_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_f_t], dim=0)
+        #     batch_pf_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_pf_t], dim=0)
+        #     batch_pb_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_pb_t], dim=0)
+        #     outline_pkg_rev = [batch_t_r, batch_o_t_r, batch_f_t_r, batch_pf_t_r, batch_pb_t_r]
+        # else:
+        outline_pkg_rev = None
+        # else:
+        #     outline_pkg_rev = None
+        #     outline_package = None
 
         if self.dec_type != 'pt':
             batch_sum = torch.stack([torch.LongTensor(self.pad_vector(i, max(summary_len))) for i in batch_sum], dim=0)

@@ -35,7 +35,7 @@ class PointerNet(Seq2seq):
 
         return targets
 
-    def forward(self, data_packages, remaining, forward_mode='train', fig=False):
+    def forward(self, data_packages, remaining, forward_mode='train', fig=False, retain_graph=False, src='full'):
         """
             batch_data: input word feature index tensors and output word index features
             remaining: source_len, outline_len, summary_len, max_tail_oov, w2fs, batch_idx2oov
@@ -103,7 +103,7 @@ class PointerNet(Seq2seq):
         if forward_mode != 'pred':
             mean_batch_loss, _ = result
             if forward_mode == 'train':
-                total_norm = self._backprop(mean_batch_loss, total_norm)
+                total_norm = self._backprop(mean_batch_loss, total_norm, retain_graph=retain_graph)
 
         if forward_mode != 'pred':
             result = (mean_batch_loss, total_norm)

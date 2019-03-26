@@ -23,11 +23,10 @@ class Seq2seq(nn.Module):
         self.encoder.rnn.flatten_parameters()
         self.decoder.rnn.flatten_parameters()
 
-    def unpack_batch_data(self, data_packages, remaining, forward_mode='train'):
-        source_package, _, _, summary_package = data_packages
-        source_len, _, summary_len, max_tail_oov, w2fs, _ = remaining
+    def unpack_batch_data(self, data_packages, remaining, forward_mode='train', src='full'):
+        source_package, outline_package, _, summary_package = data_packages
+        source_len, outline_len, summary_len, max_tail_oov, w2fs, _ = remaining
 
-        batch_s, batch_o_s, batch_f, batch_pf, batch_pb = source_package
         if forward_mode != 'pred':
             batch_sum, batch_o_sum = summary_package
             self.max_length = batch_sum.size(1) - 1  # minus the <SOS>
@@ -35,9 +34,18 @@ class Seq2seq(nn.Module):
             batch_sum, batch_o_sum = None, None
             self.max_length = 1
 
-        self.batch_size, self.max_enc_len = batch_s.size()
+        if src == 'full':
+            batch_s, batch_o_s, batch_f, batch_pf, batch_pb = source_package
 
-        return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_sum, batch_o_sum, source_len, max_tail_oov, w2fs
+            self.batch_size, self.max_enc_len = batch_s.size()
+
+            return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_sum, batch_o_sum, source_len, max_tail_oov, w2fs
+        else:
+            batch_t, batch_o_t, batch_f_t, batch_pf_t, batch_pb_t, _ = outline_package
+
+            self.batch_size, self.max_enc_len = batch_t.size()
+
+            return batch_t, batch_o_t, batch_f_t, batch_pf_t, batch_pb_t, batch_sum, batch_o_sum, outline_len, max_tail_oov, w2fs
 
     def coverage_init(self):
         if self.decoder.use_cov_loss or self.decoder.use_cov_attn:
@@ -49,7 +57,7 @@ class Seq2seq(nn.Module):
     def targets_init(self):
         return torch.LongTensor([self.decoder.sos_id] * self.batch_size).view(self.batch_size, 1).cuda()
 
-    def forward(self, data_packages, remaining, forward_mode='train', fig=False):
+    def forward(self, data_packages, remaining, forward_mode='train', fig=False, retain_graph=False, src='full'):
         """
             batch_data: input word feature index tensors and output word index features
             remaining: source_len, outline_len, summary_len, max_tail_oov, w2fs, batch_idx2oov
@@ -58,7 +66,7 @@ class Seq2seq(nn.Module):
         batch_s, batch_o_s, batch_f, batch_pf, batch_pb, \
         batch_sum, batch_o_sum, \
         source_len, max_tail_oov, w2fs = \
-            self.unpack_batch_data(data_packages, remaining, forward_mode)
+            self.unpack_batch_data(data_packages, remaining, forward_mode, src)
 
         enc_outputs, enc_keys, enc_vals, f_matrix, dec_state = self.encoder(batch_s, batch_f, batch_pf, batch_pb,
                                                                             input_lengths=source_len)
@@ -68,8 +76,9 @@ class Seq2seq(nn.Module):
         tbptt = self.tbptt if forward_mode == 'train' and self.tbptt > 0 else self.max_length
 
         total_norm = 0.0
-        chunk_losses = []
-        for batch, chunk_start in enumerate(range(0, self.max_length, tbptt)):
+        chunk_losses = 0.0
+        chunk_ranges = list(range(0, self.max_length, tbptt))
+        for chunk_idx, chunk_start in enumerate(chunk_ranges):
             if forward_mode != 'pred':
                 chunk_len = min(tbptt, self.max_length - chunk_start)
                 targets = batch_sum[:, chunk_start:chunk_start + chunk_len]
@@ -104,17 +113,18 @@ class Seq2seq(nn.Module):
             if forward_mode != 'pred':
                 dec_state = detach_state(dec_state)
                 mean_batch_loss, coverage = result
-                chunk_losses.append(mean_batch_loss)
+                chunk_losses += mean_batch_loss.item()
+                retain_graph = chunk_idx < (len(chunk_ranges)-1)
                 if forward_mode == 'train':
-                    total_norm = self._backprop(mean_batch_loss, total_norm)
+                    total_norm = self._backprop(mean_batch_loss, total_norm, retain_graph=retain_graph)
 
         if forward_mode != 'pred':
-            result = (sum(chunk_losses), total_norm)
+            result = (chunk_losses, total_norm)
         return {'{}'.format(self.decoder_type): result}
 
-    def _backprop(self, loss, total_norm):
+    def _backprop(self, loss, total_norm, retain_graph=False):
         self.optimizer.zero_grad()
-        loss.backward()
+        loss.backward(retain_graph=retain_graph)
         for p in list(filter(lambda p: p.grad is not None, self.parameters())):
             param_norm = p.grad.data.norm(2)
             total_norm += param_norm.item() ** 2

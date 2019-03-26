@@ -20,31 +20,14 @@ class Predictor(object):
         self.dataset_type = dataset_type
         self.unk_id = unk_id
 
-    def predict(self, batch_s, batch_o_s, batch_f, batch_pf, batch_pb, max_source_oov, source_len, batch_idx2oov, w2fs):
-        # NOTE: deprecated method
-        decoded_outputs, lengths = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
-                                              input_lenghts=source_len, max_source_oov=max_source_oov, w2fs=w2fs,
-                                              forward_mode='pred')
-        length = lengths[0]
-        output = []
-        # print(decoded_outputs)
-        for i in range(length):
-            symbol = decoded_outputs[0][i].item()
-            if symbol < self.vocab.size:
-                output.append(self.vocab.idx2word[symbol])
-            else:
-                output.append(batch_idx2oov[symbol-self.vocab.size])
-        print(len(output))
-        return ' '.join([i for i in output if i != '<PAD>' and i != '<EOS>' and i != '<SOS>'])
-
-    def inference(self, dataset, fig=False, save_dir=None):
+    def inference(self, dataset, fig=False, save_dir=None, src='full'):
         """ wrapper for 2 type of decoding schemes"""
         if self.decoder_type == 'prn':
-            return self.inference_prn(dataset, fig=fig, save_dir=None)
+            return self.inference_prn(dataset, fig=fig, save_dir=save_dir)
         else:
-            return self.inference_seq2seq(dataset, fig=fig, save_dir=None)
+            return self.inference_seq2seq(dataset, fig=fig, save_dir=save_dir, src=src)
 
-    def inference_seq2seq(self, dataset, fig=False, save_dir=None):
+    def inference_seq2seq(self, dataset, fig=False, save_dir=None, src='full'):
         """ 1-pass decoding: seq2seq, ptr-net, ptr-gen"""
         ref = {}
         cand = {}
@@ -78,7 +61,7 @@ class Predictor(object):
                 lab_t = None
                 targets = summaries
 
-            model_outputs = self.model(data_packages, remaining, fig=fig, forward_mode='pred')
+            model_outputs = self.model(data_packages, remaining, fig=fig, forward_mode='pred', src=src)
             dec_outs, locations, lens, losses, p_gens, selfatt, attns = model_outputs[self.model.decoder.decoder_type]
 
             token_count += sum(lens)
@@ -169,13 +152,12 @@ class Predictor(object):
             outline_len_sorted, sorted_idx = torch.from_numpy(np.array(outline_len)).to(self.device).sort(descending=True)
             reverse_idx = sorted_idx.argsort()
             batch_otl_pos_tensor = self.pad_eos(batch_outline_positions, outline_len)
-            batch_t = (batch_s.gather(1, batch_otl_pos_tensor).index_select(0, sorted_idx),
-                       batch_f.gather(1, batch_otl_pos_tensor).index_select(0, sorted_idx),
-                       batch_pf.gather(1, batch_otl_pos_tensor).index_select(0, sorted_idx),
-                       batch_pb.gather(1, batch_otl_pos_tensor).index_select(0, sorted_idx))
-            batch_o_s = batch_o_s.gather(1, batch_otl_pos_tensor.index_select(0, sorted_idx))
+            planner_source_package = (batch_s.gather(1, batch_otl_pos_tensor).index_select(0, sorted_idx),
+                                      batch_o_s.gather(1, batch_otl_pos_tensor).index_select(0, sorted_idx),
+                                      batch_f.gather(1, batch_otl_pos_tensor).index_select(0, sorted_idx),
+                                      batch_pf.gather(1, batch_otl_pos_tensor).index_select(0, sorted_idx),
+                                      batch_pb.gather(1, batch_otl_pos_tensor).index_select(0, sorted_idx))
 
-            planner_source_package = (batch_s, batch_o_s, batch_f, batch_pf, batch_pb)
             planner_remaining = (outline_len_sorted.tolist(), None, None, max_tail_oov, w2fs, None)
             planner_data_packages = (planner_source_package, None, None, None)
 
@@ -209,7 +191,7 @@ class Predictor(object):
                                        None, None,
                                        outlines, fields, targets, batch_idx2oov,
                                        None, None,
-                                       fig, figs_per_batch, batch_t[2].index_select(0, reverse_idx), batch_idx, save_dir)
+                                       fig, figs_per_batch, planner_source_package[2].index_select(0, reverse_idx), batch_idx, save_dir)
 
         # combine results from two stages
         others_1 = (None, None, outline_ids, outline_tgt_ids, planner_srcs, planner_feats, float(token_count_otl)/dataset.len)
