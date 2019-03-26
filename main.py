@@ -2,8 +2,6 @@ import argparse
 import sys
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torch.optim.lr_scheduler import *
 from predictor import Predictor
 from models.EncoderRNN import EncoderRNN
 from models.DecoderRNN import DecoderRNN
@@ -36,7 +34,7 @@ parser.add_argument('--cuda', action='store_false',
                     help='use CUDA')
 parser.add_argument('--save', type=str, default='params.pkl',
                     help='path to save the final model')
-parser.add_argument('--dataset', type=str, default='test', choices=['test', 'valid'],
+parser.add_argument('--dataset', type=str, default='valid', choices=['test', 'valid'],
                     help='type of dataset for prediction')
 parser.add_argument('--mode', type=str, default='train', choices=['train', 'eval', 'resume'])
 parser.add_argument('--type', type=int, default=0, choices=[0, 1, 2, 3],
@@ -76,7 +74,7 @@ parser.add_argument('--field_cat_pos', action='store_true',
 parser.add_argument('--field_context', action='store_false',
                     help='whether pass context vector of field embeddings to output layer')
 
-parser.add_argument('--ptr_input', type=str, default='hid', choices=['emb', 'hid'],
+parser.add_argument('--ptr_input', type=str, default='emb', choices=['emb', 'hid'],
                     help='input to pointer-network emb: normal word+feat/hidden: memory bank hidden vectors')
 parser.add_argument('--ptr_dec_feat', action='store_false',
                     help='whether to cat features for ptr-net decoder')
@@ -116,7 +114,7 @@ device = torch.device("cuda" if args.cuda else "cpu")
 
 # --------------------------------------- save_file_dir ------------------------------------------- #
 save_file_dir = os.path.dirname(args.save)
-L.info("Models are going to be saved/loaded to/from: {}".format(save_file_dir))
+L.info("Models are saved/loaded to/from: {}".format(save_file_dir))
 if not os.path.exists(save_file_dir):
     L.info("save directory does not exist, mkdir ...")
     os.mkdir(save_file_dir)
@@ -165,26 +163,15 @@ pprint.pprint(vars(args), indent=2)
 # ------------------------------------ Training Functions ------------------------------------------ #
 # -------------------------------------------------------------------------------------------------- #
 
-def train_batch(t_dataset, batch_idx, model, teacher_forcing_ratio):
+
+def train_batch(model, t_dataset, batch_idx):
     """ Train with one batch """
     data_packages, _, remaining = t_dataset.get_batch(batch_idx)
-    mean_batch_loss = model(data_packages, remaining, teacher_forcing_ratio)
-    # TODO: use weighting factor
-    if isinstance(mean_batch_loss, tuple):
-        mean_batch_loss = mean_batch_loss[0] + mean_batch_loss[1]
-    model.zero_grad()
-    mean_batch_loss.backward()
-    total_norm = 0.0
-    for p in list(filter(lambda p: p.grad is not None, model.parameters())):
-        param_norm = p.grad.data.norm(2)
-        total_norm += param_norm.item() ** 2
-    total_norm = total_norm ** (1. / 2)
+    batch_output = model(data_packages, remaining)
+    batch_size = len(remaining[0])
+    return batch_output, batch_size
 
-    torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
-    optimizer.step()
-    return mean_batch_loss.item(), len(remaining[0]), total_norm
-
-def train(t_dataset, t4e_dataset, v_dataset, model, n_epochs, teacher_forcing_ratio, load_epoch=0):
+def train(t_dataset, t4e_dataset, v_dataset, model, n_epochs, load_epoch=0):
     """
     Train epochs, evaluate and inference on valid set
     Evaluation starts from epoch 0: random initialization
@@ -202,10 +189,15 @@ def train(t_dataset, t4e_dataset, v_dataset, model, n_epochs, teacher_forcing_ra
         # ----------------------------------- Eval on Valid set ------------------------------------ #
         # ------------------------------------------------------------------------------------------ #
         L.info("Validation Epoch - {}".format(epoch))
-        valid_f = Validator(model=model, v_dataset=v_dataset, use_cuda=args.cuda, tfr=teacher_forcing_ratio)
-        valid_loss = valid_f.valid()
+        valid_f = Validator(model=model, v_dataset=v_dataset, use_cuda=args.cuda)
+        valid_loss, num_valid_expls = valid_f.valid(epoch)
         if epoch > 0:
-            writer.add_scalar('loss/valid', valid_loss, epoch)
+            for mdl, vloss in valid_loss.items():
+                vloss /= num_valid_expls
+                L.info('Inference Result:')
+                L.info('[{}] valid_loss: {}'.format(mdl, vloss))
+                writer.add_scalar('loss/{}/valid'.format(mdl), vloss, epoch)
+
         # ------------------------------------------------------------------------------------------ #
         # --------------------------------- Inference on Valid set --------------------------------- #
         # ------------------------------------------------------------------------------------------ #
@@ -213,59 +205,31 @@ def train(t_dataset, t4e_dataset, v_dataset, model, n_epochs, teacher_forcing_ra
         predictor = Predictor(model=model, vocab=v_dataset.vocab, use_cuda=args.cuda,
                               decoder_type=args.dec_type, unk_gen=config.unk_gen, dataset_type=args.type)
         valid_results = predictor.inference(v_dataset, save_dir=save_file_dir)
-
-        if isinstance(valid_results, tuple):
-            cand, ref, valid_ppl, others = valid_results
+        for mdl, results in valid_results.items():
+            cand, ref, valid_ppl, others = results
             if epoch > 0:
-                L.info('Result:')
-                L.info('valid_loss: {}'.format(valid_loss))
-                L.info('valid_ppl: {}'.format(valid_ppl))
-                writer.add_scalar('perplexity/valid', valid_ppl, epoch)
-                writer.add_scalar('output_len/valid', others[-1], epoch)
+                L.info('[{}] Valid set Result:'.format(mdl))
+                L.info('[{}] valid_ppl: {}'.format(mdl, valid_ppl))
+                writer.add_scalar('{}/perplexity/valid'.format(mdl), valid_ppl, epoch)
+                writer.add_scalar('{}/output_len/valid'.format(mdl), others[-1], epoch)
             valid_scores = print_save_metrics(args, config, metrics, epoch, v_dataset, save_file_dir,
-                                              cand, ref, others, live=True)
+                                              cand, ref, others, live=True, mdl=mdl)
             metrics.run_logger(writer=writer, epoch=epoch)
-
-        elif isinstance(valid_results, dict):
-            for mdl, results in valid_results.items():
-                cand, ref, valid_ppl, others = results
-                if epoch > 0:
-                    L.info('[{}] Result:'.format(mdl))
-                    L.info('[{}] valid_loss: {}'.format(mdl, valid_loss))
-                    L.info('[{}] valid_ppl: {}'.format(mdl, valid_ppl))
-                    writer.add_scalar('{}/perplexity/valid'.format(mdl), valid_ppl, epoch)
-                    writer.add_scalar('{}/output_len/valid'.format(mdl), others[-1], epoch)
-                valid_scores = print_save_metrics(args, config, metrics, epoch, v_dataset, save_file_dir,
-                                                  cand, ref, others, live=True, mdl=mdl)
-                metrics.run_logger(writer=writer, epoch=epoch)
 
         # ------------------------------------------------------------------------------------------ #
         # ---------------------------- Eval and Metrics on Training set ---------------------------- #
         # ------------------------------------------------------------------------------------------ #
         train_results = predictor.inference(t4e_dataset, save_dir=save_file_dir)
-
-        if isinstance(train_results, tuple):
-            cand, ref, train_ppl, others = train_results
+        for mdl, results in train_results.items():
+            cand, ref, train_ppl, others = results
             if epoch > 0:
-                L.info('Result:')
-                L.info('train_ppl: {}'.format(train_ppl))
-                writer.add_scalar('perplexity/train', train_ppl, epoch)
-                writer.add_scalar('output_len/train', others[-1], epoch)
+                L.info('[{}] Train set Result:'.format(mdl))
+                L.info('[{}] train_ppl: {}'.format(mdl, train_ppl))
+                writer.add_scalar('{}/perplexity/train'.format(mdl), train_ppl, epoch)
+                writer.add_scalar('{}/output_len/train'.format(mdl), others[-1], epoch)
             _ = print_save_metrics(args, config, metrics, epoch, t4e_dataset, save_file_dir,
                                    cand, ref, others, live=True, save=False)
-            metrics.run_logger(writer=writer, epoch=epoch, cat='train_metrics')
-
-        elif isinstance(train_results, dict):
-            for mdl, results in train_results.items():
-                cand, ref, train_ppl, others = results
-                if epoch > 0:
-                    L.info('[{}] Result:'.format(mdl))
-                    L.info('[{}] train_ppl: {}'.format(mdl, train_ppl))
-                    writer.add_scalar('{}/perplexity/train'.format(mdl), train_ppl, epoch)
-                    writer.add_scalar('{}/output_len/train'.format(mdl), others[-1], epoch)
-                _ = print_save_metrics(args, config, metrics, epoch, t4e_dataset, save_file_dir,
-                                       cand, ref, others, live=True, save=False)
-                metrics.run_logger(writer=writer, epoch=epoch, cat='train_metrics/{}'.format(mdl))
+            metrics.run_logger(writer=writer, epoch=epoch, cat='train_metrics/{}'.format(mdl))
 
         # ------------------------------------------------------------------------------------------ #
         # ------------------------------------------ save ------------------------------------------ #
@@ -298,9 +262,12 @@ def train(t_dataset, t4e_dataset, v_dataset, model, n_epochs, teacher_forcing_ra
         L.info("Training Epoch - {}".format(epoch))
         L.info("{} batches to be trained".format(num_train_batch))
 
-        model.train(True)
-        torch.set_grad_enabled(True)
-        epoch_loss = 0.0
+        model.train(True)  # turn on train mode
+        torch.set_grad_enabled(True)  # start gradient tracking
+        if args.dec_type == 'prn':
+            epoch_loss = {'prn-planner': 0.0, 'prn-realizer': 0.0}
+        else:
+            epoch_loss = {'{}'.format(args.dec_type): 0.0}
 
         batch_indices = list(range(num_train_batch))  # decreasing length by default
         batch_indices.reverse()  # start from the short ones
@@ -309,39 +276,25 @@ def train(t_dataset, t4e_dataset, v_dataset, model, n_epochs, teacher_forcing_ra
 
         start_time = time.time()
         for idx, batch_idx in enumerate(batch_indices):
-            mean_batch_loss, batch_size, total_norm = train_batch(t_dataset, batch_idx, model, teacher_forcing_ratio)
-            epoch_loss += mean_batch_loss * batch_size
-            if idx%1 == 0:
-                t = time.time()-start_time
-                sys.stdout.write('%d batches trained. current batch loss: %f [%.3fs]\r' % (idx, mean_batch_loss, t))
-                sys.stdout.flush()
-            writer.add_scalar('batch/loss', mean_batch_loss, (epoch-1)*num_train_batch+idx+1)
-            writer.add_scalar('batch/grad_norm', total_norm, (epoch-1)*num_train_batch+idx+1)
+            batch_output, batch_size = train_batch(model, t_dataset, batch_idx)
+            for mdl, outputs in batch_output.items():
+                mean_batch_loss, total_norm = outputs
+                # TODO: sum two losses separately
+                epoch_loss[mdl] += mean_batch_loss * batch_size
+                if idx % 1 == 0:
+                    t = time.time() - start_time
+                    sys.stdout.write(
+                        '%d batches trained. current batch loss: %f [%.3fs]\r' % (idx, mean_batch_loss, t))
+                    sys.stdout.flush()
+                writer.add_scalar('{}/batch/loss'.format(mdl), mean_batch_loss, (epoch - 1) * num_train_batch + idx + 1)
+                writer.add_scalar('{}/batch/grad_norm'.format(mdl), total_norm, (epoch - 1) * num_train_batch + idx + 1)
 
-        epoch_loss /= num_train_expls
-        L.info("\nFinished epoch %d with average loss: %.4f" % (epoch, epoch_loss))
-        writer.add_scalar('loss/train', epoch_loss, epoch)
-        if scheduler is not None:
-            if isinstance(scheduler, ReduceLROnPlateau):
-                scheduler.step(valid_ppl)
-            else:
-                scheduler.step()
-
-
-def get_scheduler(config, optimizer):
-    if config.decay_rate < 1:
-        if config.scheduler == 'exp':
-            return ExponentialLR(optimizer, gamma=config.decay_rate)
-        elif config.scheduler == 'plateau':
-            return ReduceLROnPlateau(optimizer, 'min', patience=1, factor=config.decay_rate)
-        elif config.scheduler == 'step':
-            milestones = list(range(config.decay_start, config.epochs))
-            return MultiStepLR(optimizer, milestones, gamma=config.decay_rate)
-        else:
-            raise ValueError("{} scheduler not supported".format(config.scheduler))
-    else:
-        return None
-
+        L.info("\nFinished epoch %d" %epoch)
+        for mdl, epl in epoch_loss.items():
+            epl /= num_train_expls
+            L.info("[%s] average loss: %.4f" % (mdl, epl))
+            writer.add_scalar('loss/{}/train'.format(mdl), epl, epoch)
+        model.scheduler.step()
 
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------------- Main ------------------------------------------------- #
@@ -397,93 +350,102 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------------------------------------------- #
     if args.dec_type == 'prn':
         # 2 encoders
-        encoder_all = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding,
+        encoder_all = EncoderRNN(vocab_size=t_dataset.vocab.size,
                                  eos_id=t_dataset.vocab.eos_id,
                                  mask_id=t_dataset.vocab.eos_id,
                                  embed_size=config.emsize, fdsize=fd_size, hidden_size=hidden_size,
                                  posit_size=posit_size, dec_size=hidden_size, attn_size=config.attn_size,
-                                 attn_src=args.attn_src,
+                                 attn_src=args.attn_src, attn_level=args.attn_level,
                                  dropout_p=config.dropout, n_layers=config.nlayers,
                                  rnn_cell=config.cell,
                                  directions=config.directions,
-                                 variable_lengths=True, field_cat_pos=args.field_cat_pos,
-                                 field_embedding=field_embedding, pos_embedding=pos_embedding,
+                                 variable_lengths=True,
+                                 field_cat_pos=args.field_cat_pos, field_self_att=args.field_self_att,
+                                 embedding=embedding, field_embedding=field_embedding, pos_embedding=pos_embedding,
                                  dataset_type=args.type, enc_type=args.enc_type)
 
         '''
             4 differences: (1) mask_id (2) attn_src (3) directions (4) enc_type
         '''
-        encoder_otl = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding,
+        encoder_otl = EncoderRNN(vocab_size=t_dataset.vocab.size,
                                  eos_id=t_dataset.vocab.eos_id,
                                  mask_id=t_dataset.vocab.unk_id,
                                  embed_size=config.emsize, fdsize=fd_size, hidden_size=hidden_size,
                                  posit_size=posit_size, dec_size=hidden_size, attn_size=config.attn_size,
-                                 attn_src='rnn',
+                                 attn_src='rnn', attn_level=args.attn_level,
                                  dropout_p=config.dropout, n_layers=config.nlayers,
                                  rnn_cell=config.cell,
                                  directions=config.enc_otl_dir,
-                                 variable_lengths=True, field_cat_pos=args.field_cat_pos,
-                                 field_embedding=field_embedding, pos_embedding=pos_embedding,
+                                 variable_lengths=True,
+                                 field_cat_pos=args.field_cat_pos, field_self_att=args.field_self_att,
+                                 embedding=embedding, field_embedding=field_embedding, pos_embedding=pos_embedding,
                                  dataset_type=args.type, enc_type='rnn')
 
         # 2 decoders
-        planner = DecoderRNN(dec_type='pt', ptr_input=args.ptr_input, ptr_feat_merge=args.ptr_feat_merge,
-                             vocab_size=t_dataset.vocab.size, embedding=embedding,
-                             embed_size=config.emsize, hidden_size=hidden_size, fdsize=fd_size, posit_size=posit_size,
-                             pad_id=t_dataset.vocab.pad_id, sos_id=t_dataset.vocab.sos_id,
-                             eos_id=t_dataset.vocab.eos_id, unk_id=t_dataset.vocab.unk_id,
-                             rnn_cell=config.cell, directions=config.directions,
-                             attn_src=args.attn_src, attn_level=args.attn_level,
-                             attn_type=args.attn_type, attn_fuse=args.attn_fuse,
-                             ptr_dec_feat=args.ptr_dec_feat,
-                             use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
-                             field_self_att=args.field_self_att, field_cat_pos=args.field_cat_pos,
-                             field_context=args.field_context, context_mlp=args.context_mlp,
-                             mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen,
-                             max_len=config.max_len, min_len=config.min_len,
-                             dropout_p=config.dropout, n_layers=config.nlayers,
-                             field_embedding=field_embedding, pos_embedding=pos_embedding, enc_type=args.enc_type)
+        decoder_otl = DecoderRNN(dec_type='pt', dataset_type=args.type,
+                                 ptr_input=args.ptr_input, ptr_feat_merge=args.ptr_feat_merge,
+                                 vocab_size=t_dataset.vocab.size,
+                                 embed_size=config.emsize, hidden_size=hidden_size, fdsize=fd_size, posit_size=posit_size,
+                                 pad_id=t_dataset.vocab.pad_id, sos_id=t_dataset.vocab.sos_id,
+                                 eos_id=t_dataset.vocab.eos_id, unk_id=t_dataset.vocab.unk_id,
+                                 rnn_cell=config.cell, directions=config.directions,
+                                 attn_src=args.attn_src, attn_level=args.attn_level,
+                                 attn_type=args.attn_type, attn_fuse=args.attn_fuse,
+                                 ptr_dec_feat=args.ptr_dec_feat,
+                                 use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
+                                 field_self_att=args.field_self_att, field_cat_pos=args.field_cat_pos,
+                                 field_context=args.field_context, context_mlp=args.context_mlp,
+                                 mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen,
+                                 max_len=config.max_len, min_len=config.min_len,
+                                 dropout_p=config.dropout, n_layers=config.nlayers,
+                                 embedding=embedding, field_embedding=field_embedding, pos_embedding=pos_embedding)
 
         '''
             2 differences: (1) dec_type (2) enc_type
         '''
-        realizer = DecoderRNN(dec_type='pg', ptr_input=args.ptr_input, ptr_feat_merge=args.ptr_feat_merge,
-                              vocab_size=t_dataset.vocab.size, embedding=embedding,
-                              embed_size=config.emsize, hidden_size=hidden_size, fdsize=fd_size, posit_size=posit_size,
-                              pad_id=t_dataset.vocab.pad_id, sos_id=t_dataset.vocab.sos_id,
-                              eos_id=t_dataset.vocab.eos_id, unk_id=t_dataset.vocab.unk_id,
-                              rnn_cell=config.cell, directions=config.enc_otl_dir,
-                              attn_src=args.attn_src, attn_level=args.attn_level,
-                              attn_type=args.attn_type, attn_fuse=args.attn_fuse,
-                              ptr_dec_feat=args.ptr_dec_feat,
-                              use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
-                              field_self_att=args.field_self_att, field_cat_pos=args.field_cat_pos,
-                              field_context=args.field_context, context_mlp=args.context_mlp,
-                              mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen,
-                              max_len=config.max_len, min_len=config.min_len,
-                              dropout_p=config.dropout, n_layers=config.nlayers,
-                              field_embedding=field_embedding, pos_embedding=pos_embedding, enc_type='rnn')
+        decoder_sum = DecoderRNN(dec_type='pg', dataset_type=args.type,
+                                 ptr_input=args.ptr_input, ptr_feat_merge=args.ptr_feat_merge,
+                                 vocab_size=t_dataset.vocab.size,
+                                 embed_size=config.emsize, hidden_size=hidden_size, fdsize=fd_size, posit_size=posit_size,
+                                 pad_id=t_dataset.vocab.pad_id, sos_id=t_dataset.vocab.sos_id,
+                                 eos_id=t_dataset.vocab.eos_id, unk_id=t_dataset.vocab.unk_id,
+                                 rnn_cell=config.cell, directions=config.enc_otl_dir,
+                                 attn_src=args.attn_src, attn_level=args.attn_level,
+                                 attn_type=args.attn_type, attn_fuse=args.attn_fuse,
+                                 ptr_dec_feat=args.ptr_dec_feat,
+                                 use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
+                                 field_self_att=args.field_self_att, field_cat_pos=args.field_cat_pos,
+                                 field_context=args.field_context, context_mlp=args.context_mlp,
+                                 mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen,
+                                 max_len=config.max_sum_len, min_len=config.min_sum_len,
+                                 dropout_p=config.dropout, n_layers=config.nlayers,
+                                 embedding=embedding, field_embedding=field_embedding, pos_embedding=pos_embedding)
 
         # full model
-        model = PRN(encoder_all, encoder_otl, planner, realizer).to(device)
+        planner = PointerNet(encoder_all, decoder_otl, config).to(device)
+        realizer = Seq2seq(encoder_otl, decoder_sum, config).to(device)
+        model = PRN(planner, realizer, config).to(device)
 
     else:
         mask_id = t_dataset.vocab.eos_id if args.dec_type == 'pt' else t_dataset.vocab.unk_id
-
-        encoder = EncoderRNN(vocab_size=t_dataset.vocab.size, embedding=embedding,
+        max_len = config.max_len if args.dec_type == 'pt' else config.max_sum_len
+        min_len = config.min_len if args.dec_type == 'pt' else config.min_sum_len
+        encoder = EncoderRNN(vocab_size=t_dataset.vocab.size,
                              eos_id=t_dataset.vocab.eos_id,
                              mask_id=mask_id,
                              embed_size=config.emsize, fdsize=fd_size, hidden_size=hidden_size,
                              posit_size=posit_size, dec_size=hidden_size, attn_size=config.attn_size,
-                             attn_src=args.attn_src,
+                             attn_src=args.attn_src, attn_level=args.attn_level,
                              dropout_p=config.dropout, n_layers=config.nlayers,
                              rnn_cell=config.cell, directions=config.directions,
-                             variable_lengths=True, field_cat_pos=args.field_cat_pos,
-                             field_embedding=field_embedding, pos_embedding=pos_embedding,
+                             variable_lengths=True,
+                             field_cat_pos=args.field_cat_pos, field_self_att=args.field_self_att,
+                             embedding=embedding, field_embedding=field_embedding, pos_embedding=pos_embedding,
                              dataset_type=args.type, enc_type=args.enc_type)
 
-        decoder = DecoderRNN(dec_type=args.dec_type, ptr_input=args.ptr_input, ptr_feat_merge=args.ptr_feat_merge,
-                             vocab_size=t_dataset.vocab.size, embedding=embedding,
+        decoder = DecoderRNN(dec_type=args.dec_type, dataset_type=args.type,
+                             ptr_input=args.ptr_input, ptr_feat_merge=args.ptr_feat_merge,
+                             vocab_size=t_dataset.vocab.size,
                              embed_size=config.emsize, hidden_size=hidden_size, fdsize=fd_size, posit_size=posit_size,
                              pad_id=t_dataset.vocab.pad_id, sos_id=t_dataset.vocab.sos_id,
                              eos_id=t_dataset.vocab.eos_id, unk_id=t_dataset.vocab.unk_id,
@@ -495,17 +457,14 @@ if __name__ == "__main__":
                              field_self_att=args.field_self_att, field_cat_pos=args.field_cat_pos,
                              field_context=args.field_context, context_mlp=args.context_mlp,
                              mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen,
-                             max_len=config.max_len, min_len=config.min_len,
+                             max_len=max_len, min_len=min_len,
                              dropout_p=config.dropout, n_layers=config.nlayers,
-                             field_embedding=field_embedding, pos_embedding=pos_embedding, enc_type=args.enc_type)
+                             embedding=embedding, field_embedding=field_embedding, pos_embedding=pos_embedding)
 
         if args.dec_type in ['pg', 'seq']:
-            model = Seq2seq(encoder, decoder).to(device)
+            model = Seq2seq(encoder, decoder, config).to(device)
         elif args.dec_type == 'pt':
-            model = PointerNet(encoder, decoder).to(device)
-
-    optimizer = optim.Adam(model.parameters(), lr=config.lr)
-    scheduler = get_scheduler(config, optimizer)
+            model = PointerNet(encoder, decoder, config).to(device)
 
     # ------------------------------------------------------------------------------------------------ #
     # -------------------------------------- Initialization ------------------------------------------ #
@@ -514,25 +473,27 @@ if __name__ == "__main__":
     params_dict = {}
     if args.xavier:
         for name, param in model.named_parameters():
+            name_prefix = name.split('.')[0]
+            name_suffix = '.'.join(name.split('.')[1:])
             if param.requires_grad:
                 if 'rnn' in name or 'V' in name or 'embedding' in name:
                     if 'bias' in name:
                         nn.init.constant_(param, 0.0)
-                        params_dict["[Constant-0][{}] {}".format(param.dtype, name)] = param.size()
+                        params_dict["[{}][Constant-0] {}".format(name_prefix, name_suffix)] = param.size()
                         # print("Constant(0): {}".format(name))
                     else:
                         nn.init.xavier_uniform_(param)
-                        params_dict["[Xavier][{}] {}".format(param.dtype, name)] = param.size()
+                        params_dict["[{}][Xavier] {}".format(name_prefix, name_suffix)] = param.size()
                 else:
                     try:
                         nn.init.xavier_uniform_(param)
-                        params_dict["[Xavier][{}] {}".format(param.dtype, name)] = param.size()
+                        params_dict["[{}][Xavier] {}".format(name_prefix, name_suffix)] = param.size()
                     except:
                         if param.size()[0] == 1:
                             nn.init.constant_(param, 0.0)
-                            params_dict["[Constant-0][{}] {}".format(param.dtype, name)] = param.size()
+                            params_dict["[{}][Constant-0] {}".format(name_prefix, name_suffix)] = param.size()
                         else:
-                            params_dict["[Uniform: 1/dim*0.5][{}] {}".format(param.dtype, name)] = param.size()
+                            params_dict["[{}][Uniform: 1/dim*0.5] {}".format(name_prefix, name_suffix)] = param.size()
 
         pprint.pprint(params_dict, indent=2)
     else:
@@ -554,7 +515,7 @@ if __name__ == "__main__":
                                        batch_size=config.valid_batch, dec_type=args.dec_type)
 
             L.info("start training...")
-            train(t_dataset, t4e_dataset, v_dataset, model, config.epochs, teacher_forcing_ratio=1)
+            train(t_dataset, t4e_dataset, v_dataset, model, config.epochs)
             writer.close()
         except KeyboardInterrupt:
             L.info('-' * 89)
@@ -578,17 +539,9 @@ if __name__ == "__main__":
 
         L.info("Start Evaluating ...")
         valid_results = predictor.inference(dataset, fig=args.fig, save_dir=save_file_dir)
-
-        if isinstance(valid_results, tuple):
-            cand, ref, ppl, others = valid_results
-            L.info('Result:')
-            L.info('{}_ppl: {}'.format(args.dataset, ppl))
-            _ = print_save_metrics(args, config, metrics, load_epoch, dataset, save_file_dir, cand, ref, others, live=False)
-
-        elif isinstance(valid_results, dict):
-            for mdl, results in valid_results:
-                cand, ref, ppl, others = results
-                L.info('[{}] Result:'.format(mdl))
-                L.info('[{}] {}_ppl: {}'.format(mdl, args.dataset, ppl))
-                _ = print_save_metrics(args, config, metrics, load_epoch, dataset, save_file_dir, cand, ref, others,
-                                       live=False, mdl=mdl)
+        for mdl, results in valid_results.items():
+            cand, ref, ppl, others = results
+            L.info('[{}] Result:'.format(mdl))
+            L.info('[{}] {}_ppl: {}'.format(mdl, args.dataset, ppl))
+            _ = print_save_metrics(args, config, metrics, load_epoch, dataset, save_file_dir, cand, ref, others,
+                                   live=False, mdl=mdl)

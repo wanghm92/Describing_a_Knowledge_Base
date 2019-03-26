@@ -1,5 +1,6 @@
-
 import numpy as np
+from torch.optim.lr_scheduler import *
+
 DELIM = u"￨"
 
 def print_save_metrics(args, config, metrics, epoch, dataset, save_file_dir,
@@ -83,3 +84,54 @@ def print_save_metrics(args, config, metrics, epoch, dataset, save_file_dir,
     return final_scores
 
 
+class Scheduler(object):
+    """ a simple wrapper over multiple schedulers"""
+    def __init__(self, config, optimizer):
+
+        if isinstance(optimizer, tuple):
+            self.scheduler = tuple([self._build_scheduler(config, x) for x in optimizer])
+        else:
+            self.scheduler = self._build_scheduler(config, optimizer)
+
+    def _build_scheduler(self, config, optimizer):
+        if config.decay_rate < 1:
+            if config.scheduler == 'exp':
+                return ExponentialLR(optimizer, gamma=config.decay_rate)
+            elif config.scheduler == 'plateau':
+                return ReduceLROnPlateau(optimizer, 'min', patience=1, factor=config.decay_rate)
+            elif config.scheduler == 'step':
+                milestones = list(range(config.decay_start, config.epochs))
+                return MultiStepLR(optimizer, milestones, gamma=config.decay_rate)
+            else:
+                raise ValueError("{} scheduler not supported".format(config.scheduler))
+        else:
+            return None
+
+    def step(self, metrics=None):
+
+        def run_step(scheduler, metrics=None):
+            if isinstance(scheduler, ReduceLROnPlateau):
+                assert metrics is not None
+                scheduler.step(metrics)
+            else:
+                scheduler.step()
+
+        if self.scheduler is None:
+            pass
+        else:
+            if isinstance(self.scheduler, tuple):
+                if isinstance(metrics, tuple):
+                    for x, y in zip(self.scheduler, metrics):
+                        run_step(x, y)
+                else:
+                    for x in self.scheduler:
+                        run_step(x)
+            else:
+                run_step(self.scheduler, metrics)
+
+def detach_state(h):
+    """Wraps hidden states in new Tensors, to detach them from their history."""
+    if isinstance(h, torch.Tensor):
+        return h.detach()
+    else:
+        return tuple(detach_state(v) for v in h)

@@ -17,7 +17,7 @@ class Vocabulary:
                  field=None, corpus=None,
                  start_end_tokens=True,
                  max_words=20000,
-                 min_frequency=3, min_frequency_field=0, min_frequency_rcd=0,
+                 min_frequency=0, min_frequency_field=0, min_frequency_rcd=0,
                  pad_id=0, sos_id=1, eos_id=2, unk_id=3,
                  dec_type='pt'):
 
@@ -85,7 +85,9 @@ class Vocabulary:
             self.ha_vocab_size = len(self.ha2idx)
 
             # print(self.field_vocab)
+            print("Record Type vocab:")
             print(self.rcd_vocab)
+            print("Vocab sizes:")
             print(self.size)
             print(self.field_vocab_size)
             print(self.rcd_vocab_size)
@@ -143,7 +145,7 @@ class Vocabulary:
         vector.append(item2idx['<EOS>'])
         return [item2idx['<SOS>']] + vector
 
-    def vectorize_feature(self, vector, ft_type='field'):
+    def vectorize_feature(self, vector, ft_type='field', is_outline=False):
 
         if ft_type == 'field':
             ft2idx = self.field2idx
@@ -155,7 +157,7 @@ class Vocabulary:
             raise ValueError("{} not supported".format(ft_type))
 
         _ft = [ft2idx.get(x, ft2idx['<UNK>']) for x in vector]
-        if self.dec_type in ['pt', 'prn']:
+        if self.dec_type in ['pt', 'prn'] or is_outline:
             # add <SOS> at the beginning and <EOS> to the end for ptr-net to choose from
             _ft = self.add_start_end(_ft, item2idx=ft2idx)
         return _ft
@@ -337,7 +339,7 @@ class Table2text_seq:
     def load_vocab(self, path):
         print("Loading data ** LIGHT ** from {}".format(path))
         prefix = "{}/table2text_nlg/describe_kb/outputs".format(HOME)
-        vocab_path_pkl = "{}/rotowire_vocab_pt.pkl".format(prefix)
+        vocab_path_pkl = "{}/rotowire_vocab_prn.pkl".format(prefix)
         print("loading vocab ... from {}".format(vocab_path_pkl))
         with open(vocab_path_pkl, 'rb') as fin:
             data = pickle.load(fin)
@@ -404,7 +406,7 @@ class Table2text_seq:
                 field_t.append(tag)
                 rcd_t.append(rcd)
                 ha_t.append(ha)
-                lab_t.append(lab+1)  # int
+                lab_t.append(lab+1)  # +1 for sources have leading <sos>; type is int
 
             summary = old_summaries[idx]
             summary = [x.lower() for x in summary]  # NOTE: changed to lowercase strings
@@ -437,8 +439,8 @@ class Table2text_seq:
         self.sort_indices.reverse()  # decreasing length
         samples = np.array(samples)[self.sort_indices].tolist()
 
-        vocab_path_pkl = "{}/rotowire_vocab_pt.pkl".format(prefix)
-        vocab_path_js = "{}/rotowire_vocab_pt.json".format(prefix)
+        vocab_path_pkl = "{}/rotowire_vocab_prn.pkl".format(prefix)
+        vocab_path_js = "{}/rotowire_vocab_prn.json".format(prefix)
         if self.data_src == 'train':
             print("saving vocab ...")
             self.vocab = Vocabulary(corpus=total, field=(total_field, total_rcd), dec_type=self.dec_type)
@@ -525,9 +527,11 @@ class Table2text_seq:
             value_t, field_t, rcd_t, ha_t, lab_t = outline  #tokens
 
             # <EOS> and <SOS>
-            src_len = len(source) + 2
+            src_len = len(source)
             sum_len = len(summary) + 2
             otl_len = len(value_t) + 2
+            if self.dec_type in ['pt', 'prn']:
+                src_len += 2
 
             # print("src_len: {}".format(src_len))
             # print("otl_len: {}".format(otl_len))
@@ -545,9 +549,9 @@ class Table2text_seq:
 
             # ----------------------- outline word and features to ids ------------------------- #
             _o_outline, outline_oov, _outline, oov_freq_otl = self.vocab.vectorize_outline(value_t)
-            _fields_t = self.vocab.vectorize_feature(field_t, ft_type='field')
-            _rcd_t = self.vocab.vectorize_feature(rcd_t, ft_type='rcd')
-            _ha_t = self.vocab.vectorize_feature(ha_t, ft_type='ha')
+            _fields_t = self.vocab.vectorize_feature(field_t, ft_type='field', is_outline=True)
+            _rcd_t = self.vocab.vectorize_feature(rcd_t, ft_type='rcd', is_outline=True)
+            _ha_t = self.vocab.vectorize_feature(ha_t, ft_type='ha', is_outline=True)
             _lab_t = [0] + lab_t + [src_len-1]  # start from copying the 0th <SOS> token
 
             # ----------------------- summary word to ids ------------------------- #
@@ -567,14 +571,18 @@ class Table2text_seq:
             self.total_cnt_sum += len(_summary)
 
             # ----------------------- prepare for evaluation ------------------------- #
-            # if tail_oov_vocab:
-            tail_oov_vocab = tail_oov_vocab.items()
-            if max_tail_oov < len(tail_oov_vocab):
-                max_tail_oov = len(tail_oov_vocab)
-            idx2oov = {idx: word for word, idx in tail_oov_vocab}
-            w2f = {(idx+self.vocab.size): self.vocab.word2idx['<UNK>'] for word, idx in tail_oov_vocab}
-            # w2f = {(idx + self.vocab.size): self.vocab.word2idx.get(table[word], self.vocab.word2idx['<UNK>'])
-            #        for word, idx in tail_oov_vocab}
+            if tail_oov_vocab:
+                tail_oov_vocab = tail_oov_vocab.items()
+                if max_tail_oov < len(tail_oov_vocab):
+                    max_tail_oov = len(tail_oov_vocab)
+                idx2oov = {idx: word for word, idx in tail_oov_vocab}
+                w2f = {(idx+self.vocab.size): self.vocab.word2idx['<UNK>'] for word, idx in tail_oov_vocab}
+                # w2f = {(idx + self.vocab.size): self.vocab.word2idx.get(table[word], self.vocab.word2idx['<UNK>'])
+                #        for word, idx in tail_oov_vocab}
+            else:
+                idx2oov = {}
+                w2f = {}
+
             w2fs.append(w2f)
             batch_idx2oov.append(idx2oov)
 
@@ -591,7 +599,7 @@ class Table2text_seq:
             # print("_rcd ({}): {}".format(len(_rcd), _rcd))
             # print("_ha ({}): {}".format(len(_ha), _ha))
             # print("_o_source ({}): {}".format(len(_o_source), _o_source))
-
+            # print(src_len)
             assert len(_source) == len(_fields) == len(_rcd) == len(_ha) == len(_o_source) == src_len
             batch_s.append(_source)
             batch_f.append(_fields)
@@ -600,12 +608,12 @@ class Table2text_seq:
             batch_o_s.append(_o_source)  # for scatter add
 
             # print("_outline ({}): {}".format(len(_outline), _outline))
-            # print("_outline_t ({}): {}".format(len(_fields_t), _fields_t))
+            # print("_fields_t ({}): {}".format(len(_fields_t), _fields_t))
             # print("_rcd_t ({}): {}".format(len(_rcd_t), _rcd_t))
             # print("_ha_t ({}): {}".format(len(_ha_t), _ha_t))
             # print("_lab_t ({}): {}".format(len(_lab_t), _lab_t))
             # print("_o_outline ({}): {}".format(len(_o_outline), _o_outline))
-
+            # print(otl_len)
             assert len(_outline) == len(_fields_t) == len(_rcd_t) == len(_ha_t) == len(_lab_t) == len(_o_outline) == otl_len
             batch_t.append(_outline)
             batch_f_t.append(_fields_t)
@@ -648,6 +656,7 @@ class Table2text_seq:
             # else:
             outline_pkg_rev = None
         else:
+            outline_pkg_rev = None
             outline_package = None
 
         if self.dec_type != 'pt':

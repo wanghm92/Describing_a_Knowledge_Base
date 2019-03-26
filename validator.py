@@ -3,36 +3,36 @@ from tqdm import tqdm
 
 class Validator(object):
 
-    def __init__(self, model, v_dataset, use_cuda, tfr):
+    def __init__(self, model, v_dataset, use_cuda):
         self.device = torch.device("cuda" if use_cuda else "cpu")
         self.model = model.to(self.device)
-        self.model.eval()
+        self.model.eval()  # switch to eval mode
+        torch.set_grad_enabled(False)  # turn off gradient tracking
         self.v_dataset = v_dataset
-        self.teacher_forcing_ratio = tfr
 
     def valid_batch(self, batch_idx):
         """ Run forward pass on valid set"""
-
         data_packages, _, remaining = self.v_dataset.get_batch(batch_idx)
-        mean_batch_loss = self.model(data_packages, remaining, teacher_forcing_ratio=self.teacher_forcing_ratio)
-        # TODO:
-            # (1) use weighting factor
-            # (2) return and log two losses
-        if isinstance(mean_batch_loss, tuple):
-            mean_batch_loss = mean_batch_loss[0] + mean_batch_loss[1]
-        return mean_batch_loss.item(), len(remaining[0])
+        batch_size = len(remaining[0])
+        batch_output = self.model(data_packages, remaining, forward_mode='valid')
+        return batch_output, batch_size
 
-    def valid(self):
-        torch.set_grad_enabled(False)
+    def valid(self, epoch):
 
-        valid_loss = 0.0
+        if self.model.decoder_type == 'prn':
+            valid_loss = {'prn-planner': 0.0, 'prn-realizer': 0.0}
+        else:
+            valid_loss = {'{}'.format(self.model.decoder_type): 0.0}
+
         num_valid_batch = len(self.v_dataset.corpus)
         num_valid_expls = self.v_dataset.len
 
         print("{} batches to be evaluated".format(num_valid_batch))
         for batch_idx in tqdm(range(num_valid_batch)):
-            mean_batch_loss, batch_size = self.valid_batch(batch_idx)
-            valid_loss += mean_batch_loss*batch_size
-        valid_loss /= num_valid_expls
+            batch_output, batch_size = self.valid_batch(batch_idx)
 
-        return valid_loss
+            for mdl, outputs in batch_output.items():
+                mean_batch_loss, _ = outputs  # total_norm is ignored
+                valid_loss[mdl] += mean_batch_loss * batch_size
+
+        return valid_loss, num_valid_expls

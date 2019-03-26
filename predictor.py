@@ -12,7 +12,8 @@ class Predictor(object):
     def __init__(self, model, vocab, use_cuda, decoder_type='pg', unk_gen=False, dataset_type=0, unk_id=3):
         self.device = torch.device("cuda" if use_cuda else "cpu")
         self.model = model.to(self.device)
-        self.model.eval()
+        self.model.eval()  # switch to eval mode
+        torch.set_grad_enabled(False)  # turn off gradient tracking
         self.vocab = vocab
         self.decoder_type = decoder_type
         self.unk_gen = unk_gen
@@ -20,9 +21,10 @@ class Predictor(object):
         self.unk_id = unk_id
 
     def predict(self, batch_s, batch_o_s, batch_f, batch_pf, batch_pb, max_source_oov, source_len, batch_idx2oov, w2fs):
-        torch.set_grad_enabled(False)
+        # NOTE: deprecated method
         decoded_outputs, lengths = self.model(batch_s, batch_o_s, batch_f, batch_pf, batch_pb,
-                                              input_lenghts=source_len, max_source_oov=max_source_oov, w2fs=w2fs)
+                                              input_lenghts=source_len, max_source_oov=max_source_oov, w2fs=w2fs,
+                                              forward_mode='pred')
         length = lengths[0]
         output = []
         # print(decoded_outputs)
@@ -44,17 +46,15 @@ class Predictor(object):
 
     def inference_seq2seq(self, dataset, fig=False, save_dir=None):
         """ 1-pass decoding: seq2seq, ptr-net, ptr-gen"""
-        torch.set_grad_enabled(False)
         ref = {}
         cand = {}
+        feats = {'fields': {}, 'rcds': {}, 'has': {}}
         if self.decoder_type == 'pt' and self.dataset_type == 3:
             cand_ids = {}
             tgt_ids = {}
-            feats = {'fields': {}, 'rcds': {}, 'has': {}}
         else:
             cand_ids = None
             tgt_ids = None
-            feats = {'fields': {}}
         sums_with_pgens = {} if self.decoder_type == 'pg' else None
         sums_with_unks = {} if self.decoder_type != 'pt' and self.unk_gen else None
         srcs = {}
@@ -78,7 +78,9 @@ class Predictor(object):
                 lab_t = None
                 targets = summaries
 
-            dec_outs, locations, lens, losses, p_gens, selfatt, attns = self.model(data_packages, remaining, fig=fig)
+            model_outputs = self.model(data_packages, remaining, fig=fig, forward_mode='pred')
+            dec_outs, locations, lens, losses, p_gens, selfatt, attns = model_outputs[self.model.decoder.decoder_type]
+
             token_count += sum(lens)
             pred_loss += sum(losses)
 
@@ -95,13 +97,12 @@ class Predictor(object):
 
         avg_len = float(token_count)/dataset.len
         others = (sums_with_unks, sums_with_pgens, cand_ids, tgt_ids, srcs, feats, avg_len)
-
-        return cand, ref, math.exp(pred_loss/token_count), others
+        out = (cand, ref, math.exp(pred_loss/token_count), others)
+        return {'{}'.format(self.model.decoder.decoder_type): out}
 
     def inference_prn(self, dataset, fig=False, save_dir=None):
         """ 2-stage decoding: planner-realizer network"""
-        torch.set_grad_enabled(False)
-        
+
         planner_srcs = {}
         planner_feats = {'fields': {}, 'rcds': {}, 'has': {}}
         planner_ref = {}
@@ -136,7 +137,7 @@ class Predictor(object):
             batch_s, batch_o_s, batch_f, batch_pf, batch_pb,\
             _, _,\
             _, _, \
-            _, outline_len, _, max_tail_oov, w2fs, _ = self.model.unpack_batch_data(data_packages, remaining)
+            _, outline_len, _, max_tail_oov, w2fs = self.model.unpack_batch_data(data_packages, remaining)
             sources, fields, summaries, outlines = texts_package
             batch_idx2oov = remaining[-1]
 
@@ -144,7 +145,9 @@ class Predictor(object):
             lab_t = data_packages[1][-1]
             targets = outlines
 
-            dec_outs, locations, outline_len, losses, _, _, attns = self.model(data_packages, remaining, fig=fig)
+            model_outputs = self.model.planner(data_packages, remaining, fig=fig, forward_mode='pred')
+            dec_outs, locations, outline_len, losses, _, _, attns = list(model_outputs.values())[0]
+
             token_count_otl += sum(outline_len)
             planner_loss += sum(losses)
 
@@ -161,7 +164,7 @@ class Predictor(object):
                                                        fig, figs_per_batch, batch_pf, batch_idx, save_dir)
 
             # stage 2 decoding
-
+            # prepare for 2-stage decoding
             outline_len = [x - 1 for x in outline_len]
             outline_len_sorted, sorted_idx = torch.from_numpy(np.array(outline_len)).to(self.device).sort(descending=True)
             reverse_idx = sorted_idx.argsort()
@@ -170,19 +173,15 @@ class Predictor(object):
                        batch_f.gather(1, batch_otl_pos_tensor).index_select(0, sorted_idx),
                        batch_pf.gather(1, batch_otl_pos_tensor).index_select(0, sorted_idx),
                        batch_pb.gather(1, batch_otl_pos_tensor).index_select(0, sorted_idx))
-            batch_o_t = batch_o_s.gather(1, batch_otl_pos_tensor.index_select(0, sorted_idx))
+            batch_o_s = batch_o_s.gather(1, batch_otl_pos_tensor.index_select(0, sorted_idx))
 
-            temp = copy.deepcopy(fields)
-            for k, v in fields.items():
-                for bth, seq in enumerate(v):
-                    temp[k][bth] = np.array(seq)[[x-1 for x in batch_outline_positions[bth]]].tolist()
-            fields = temp
-            targets = summaries
+            planner_source_package = (batch_s, batch_o_s, batch_f, batch_pf, batch_pb)
+            planner_remaining = (outline_len_sorted.tolist(), None, None, max_tail_oov, w2fs, None)
+            planner_data_packages = (planner_source_package, None, None, None)
 
-            pred_summaries = self.model.cont_fn(batch_t, batch_o_t=batch_o_t, max_tail_oov=max_tail_oov,
-                                                outline_len=outline_len_sorted.tolist(), w2fs=w2fs, fig=fig)
+            pred_summaries = self.model.realizer(planner_data_packages, planner_remaining, forward_mode='pred')
 
-            dec_outs, _, summary_lens, losses, p_gens, selfatt, attns = pred_summaries
+            dec_outs, _, summary_lens, losses, p_gens, selfatt, attns = list(pred_summaries.values())[0]
             dec_outs = torch.index_select(dec_outs, 0, reverse_idx)
             # p_gens = torch.index_select(p_gens, 0, reverse_idx) if p_gens else None
             p_gens_list = [p_gens[i, :] for i in reverse_idx.tolist()]
@@ -193,6 +192,13 @@ class Predictor(object):
 
             token_count_sum += sum(summary_lens)
             realizer_loss += sum(losses)
+
+            temp = copy.deepcopy(fields)
+            for k, v in fields.items():
+                for bth, seq in enumerate(v):
+                    temp[k][bth] = np.array(seq)[[x-1 for x in batch_outline_positions[bth]]].tolist()
+            fields = temp
+            targets = summaries
 
             realizer_counter, realizer_srcs, realizer_feats, realizer_ref, \
             batch_sums, sums_with_pgens, sums_with_unks, \
@@ -212,7 +218,7 @@ class Predictor(object):
         others_2 = (sums_with_unks, sums_with_pgens, None, None, realizer_srcs, realizer_feats, float(token_count_sum)/dataset.len)
         realizer_output = (batch_sums, realizer_ref, math.exp(realizer_loss/token_count_sum), others_2)
 
-        return {'planner': planner_output, 'realizer': realizer_output}
+        return {'prn-planner': planner_output, 'prn-realizer': realizer_output}
 
     def pad_eos(self, batch_outline_positions, lens):
         out = []

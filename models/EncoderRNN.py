@@ -1,29 +1,33 @@
-import torch.nn as nn
 import torch
+import torch.nn as nn
 import sys
 from .baseRNN import BaseRNN
 import numpy as np
 np.set_printoptions(threshold=sys.maxsize)
 
-
 class EncoderRNN(BaseRNN):
-    def __init__(self, vocab_size=0, embedding=None,
+    def __init__(self,
+                 vocab_size=0,
                  eos_id=2, mask_id=1,
                  hidden_size=0, posit_size=0, embed_size=0, fdsize=0, dec_size=0, attn_size=0,
-                 attn_src='emb', dropout_p=0, n_layers=1, rnn_cell='gru', directions=2,
-                 variable_lengths=True, field_cat_pos=False,
-                 field_embedding=None, pos_embedding=None, dataset_type=0, enc_type='rnn'):
+                 attn_src='emb', attn_level=2,
+                 dropout_p=0, n_layers=1, rnn_cell='gru', directions=2,
+                 variable_lengths=True,
+                 field_cat_pos=False, field_self_att=False,
+                 embedding=None, field_embedding=None, pos_embedding=None,
+                 dataset_type=0, enc_type='rnn'):
 
         self.rnn_type = rnn_cell.lower()
         super(EncoderRNN, self).__init__(vocab_size, hidden_size, dropout_p, n_layers)
 
         self.attn_src = attn_src
+        self.attn_level = attn_level
         self.embed_size = embed_size
         self.fdsize = fdsize
-        self.posit_size = posit_size
+        self.posit_size = posit_size  # including forward and backward positions/rcd and ha
         self.variable_lengths = variable_lengths
         self.field_cat_pos = field_cat_pos
-        self.pos_embedding = pos_embedding
+        self.field_self_att = field_self_att
         self.embedding = embedding
         self.field_embedding = field_embedding
         self.dataset_type = dataset_type
@@ -32,7 +36,16 @@ class EncoderRNN(BaseRNN):
         self.attn_size = attn_size
         self.eos_id = eos_id
         self.mask_id = mask_id
+        self.directions = directions
 
+        # ----------------- word and feature embeddings ----------------- #
+        if self.dataset_type == 3:
+            self.pos_embedding, self.rpos_embedding = pos_embedding
+        else:
+            self.pos_embedding = pos_embedding
+            self.rpos_embedding = self.pos_embedding
+
+        # ----------------- encoder layer ----------------- #
         self.input_size = self.embed_size + self.fdsize + self.posit_size
 
         if self.enc_type == 'fc':
@@ -47,8 +60,158 @@ class EncoderRNN(BaseRNN):
                                      self.hidden_size,
                                      n_layers,
                                      batch_first=True,
-                                     bidirectional=(directions == 2),
+                                     bidirectional=(self.directions == 2),
                                      dropout=self.dropout_p)
+
+        # ----------------- params for encoder memory keys ----------------- #
+        enc_hidden_size = self.hidden_size * self.directions
+        field_input_size = self.fdsize
+        # print('enc_input_size: {}'.format(enc_input_size))
+        if self.attn_level > 1 and self.field_cat_pos:
+            field_input_size += self.posit_size
+        # print('field_input_size: {}'.format(field_input_size))
+        if self.enc_type == 'rnn':
+            self.Wf = nn.Linear(field_input_size, self.hidden_size)  # field embeddings to keys
+            if self.attn_level == 3:
+                self.We = nn.Linear(self.embed_size, self.hidden_size)  # word embeddings to keys
+                self.Wr = nn.Linear(enc_hidden_size, self.hidden_size)  # encoder hidden states to keys
+            elif self.attn_level == 2:
+                if self.attn_src == 'emb':
+                    self.We = nn.Linear(self.embed_size, self.hidden_size)
+                elif self.attn_src == 'rnn':
+                    self.Wr = nn.Linear(enc_hidden_size, self.hidden_size)
+            else:
+                # NOTE: assume to use encoder rnn hidden states when attn_level == 1
+                self.Wr = nn.Linear(enc_hidden_size, self.hidden_size)
+        else:
+            self.We = None
+            self.Wf = None
+            self.Wr = None
+
+        # ----------------- parameters for self attention ----------------- #
+        if self.field_self_att:
+            self.Win = nn.Linear(self.posit_size, self.posit_size)
+            self.Wout = nn.Linear(self.posit_size, self.posit_size)
+            self.Wg = nn.Linear(self.posit_size, self.posit_size)
+
+        # ----------------- params for directions ----------------- #
+        # TODO: this bridge should have Relu/Elu
+        if self.directions == 2:
+            self.W_enc_state = nn.Linear(hidden_size * 2, hidden_size)
+
+    def _get_enc_keys(self, enc_hidden, enc_input, enc_field, batch_size, max_enc_len):
+        """
+        project encoder memories to attention keys
+        :param enc_hidden: hidden states
+        :param enc_input:  embeddings
+        :param enc_field:  field embeddings
+        :return: FC layer outputs, self.Wr for hidden, self.We for input, self.Wf for field
+        """
+
+        if self.attn_level == 3:
+            enc_hidden_flat = enc_hidden.view(batch_size * max_enc_len, -1)
+            enc_hidden_keys = self.Wr(enc_hidden_flat).view(batch_size, max_enc_len, -1)
+
+            enc_input_flat = enc_input.view(batch_size * max_enc_len, -1)
+            enc_input_keys = self.We(enc_input_flat).view(batch_size, max_enc_len, -1)
+
+        elif self.attn_level == 2:
+            if self.attn_src == 'rnn':
+                enc_hidden_flat = enc_hidden.view(batch_size * max_enc_len, -1)
+                enc_hidden_keys = self.Wr(enc_hidden_flat).view(batch_size, max_enc_len, -1)
+                enc_input_keys = None
+            elif self.attn_src == 'emb':
+                enc_hidden_keys = None
+                enc_input_flat = enc_input.view(batch_size * max_enc_len, -1)
+                enc_input_keys = self.We(enc_input_flat).view(batch_size, max_enc_len, -1)
+
+        else:
+            enc_hidden_flat = enc_hidden.view(batch_size * max_enc_len, -1)
+            enc_hidden_keys = self.Wr(enc_hidden_flat).view(batch_size, max_enc_len, -1)
+            enc_input_keys = None
+
+        if self.attn_level > 1:
+            enc_field_flat = enc_field.view(batch_size * max_enc_len, -1)
+            enc_field_keys = self.Wf(enc_field_flat).view(batch_size, max_enc_len, -1)
+        else:
+            enc_field_keys = None
+
+        return enc_hidden_keys, enc_input_keys, enc_field_keys
+
+    def _pos_self_attn(self, enc_pos, enc_hidden, enc_input, enc_field, enc_seq_mask):
+        """ compute the self-attentive encoder output and field encodings"""
+
+        enc_mask_float = enc_seq_mask.unsqueeze(2).float()
+        enc_mask_2d = enc_mask_float.bmm(enc_mask_float.transpose(1, 2))
+
+        gin = torch.tanh(self.Win(enc_pos))
+        gout = torch.tanh(self.Wout(enc_pos))
+
+        f = gin.bmm(self.Wg(gout).transpose(1, 2))
+        f.masked_fill_(enc_mask_2d.data.byte(), -np.inf)  # mask to -inf before applying softmax
+        f_matrix = torch.nn.functional.softmax(f, dim=2)
+
+        if self.attn_level == 3:
+            enc_hidden_selfatt = torch.bmm(f_matrix, enc_hidden)
+            enc_input_selfatt = torch.bmm(f_matrix, enc_input)
+            enc_field_selfatt = torch.bmm(f_matrix, enc_field)
+        elif self.attn_level == 2:
+            enc_field_selfatt = torch.bmm(f_matrix, enc_field)
+            if self.attn_src == 'rnn':
+                enc_hidden_selfatt = torch.bmm(f_matrix, enc_hidden)
+                enc_input_selfatt = enc_input
+            elif self.attn_src == 'emb':
+                enc_hidden_selfatt = enc_hidden
+                enc_input_selfatt = torch.bmm(f_matrix, enc_input)
+        else:
+            enc_hidden_selfatt = torch.bmm(f_matrix, enc_hidden)
+            enc_input_selfatt = enc_input
+            enc_field_selfatt = enc_field
+
+        enc_selfatt = (enc_hidden_selfatt, enc_input_selfatt, enc_field_selfatt)
+        return f_matrix, enc_selfatt
+
+    def _build_memory_key_values(self, enc_outputs):
+        enc_hidden, enc_input, enc_field, enc_pos, enc_state, enc_masks = enc_outputs
+        enc_seq_mask, _ = enc_masks
+
+        batch_size, max_enc_len, _ = enc_hidden.size()
+
+        # print('enc_hidden: {}'.format(enc_hidden.size()))
+        if self.enc_type == 'rnn':
+            enc_keys = self._get_enc_keys(enc_hidden, enc_input, enc_field, batch_size, max_enc_len)
+        else:
+            enc_keys = (enc_hidden, enc_input, enc_field)
+
+        # get position self-attention scores
+        if self.field_self_att:
+            f_matrix, enc_vals = self._pos_self_attn(enc_pos, enc_hidden, enc_input, enc_field, enc_seq_mask)
+        else:
+            f_matrix = None
+            enc_vals = (enc_hidden, enc_input, enc_field)
+
+        return enc_keys, enc_vals, f_matrix
+
+    def _state_bridge(self, enc_state):
+        """ Initialize the encoder hidden state. """
+        if enc_state is None:
+            return None
+        if isinstance(enc_state, tuple):
+            enc_state = tuple([self._cat_directions(h) for h in enc_state])
+        else:
+            enc_state = self._cat_directions(enc_state)
+        return enc_state
+
+    def _cat_directions(self, h):
+        """ If the encoder is bidirectional, do the following transformation.
+            (#directions * #layers, #batch, hidden_size) -> (#layers, #batch, #directions * hidden_size)
+        """
+        if self.directions == 2:
+            fw = h[0:h.size(0):2]
+            bw = h[1:h.size(0):2]
+            h = torch.cat([fw, bw], 2)
+            h = self.W_enc_state(h)
+        return h
 
     def forward(self, batch_s, batch_f, batch_pf, batch_pb, input_lengths=None):
 
@@ -63,13 +226,8 @@ class EncoderRNN(BaseRNN):
         else:
             embed_field = self.embedding(batch_f)
             
-        if self.dataset_type == 3:
-            rcd_embedding, ha_embedding = self.pos_embedding
-            embed_pf = rcd_embedding(batch_pf)
-            embed_pb = ha_embedding(batch_pb)
-        else:
-            embed_pf = self.pos_embedding(batch_pf)
-            embed_pb = self.pos_embedding(batch_pb)
+        embed_pf = self.pos_embedding(batch_pf)
+        embed_pb = self.rpos_embedding(batch_pb)
         embed_pos = torch.cat((embed_pf, embed_pb), dim=2)
         embed_field_pos = torch.cat((embed_field, embed_pos), dim=2)
         embedded = torch.cat((embed_input, embed_field_pos), dim=2)
@@ -80,16 +238,16 @@ class EncoderRNN(BaseRNN):
             enc_hidden, enc_state = self.rnn(embedded)
 
             if self.attn_src == 'emb':
-                enc_outputs = None
+                enc_hidden = None
             else:
-                enc_outputs, _ = nn.utils.rnn.pad_packed_sequence(enc_hidden, batch_first=True)
-                enc_outputs = enc_outputs.contiguous()
+                enc_hidden, _ = nn.utils.rnn.pad_packed_sequence(enc_hidden, batch_first=True)
+                enc_hidden = enc_hidden.contiguous()
 
         elif self.enc_type == 'fc':
-            batch, sourceL, dim = embedded.size()
+            batch, source_len, _ = embedded.size()
             mask = enc_mask.unsqueeze(1)
-            mask = mask.repeat(1, sourceL, 1)
-            mask_self_index = list(range(sourceL))
+            mask = mask.repeat(1, source_len, 1)
+            mask_self_index = list(range(source_len))
             mask[:, mask_self_index, mask_self_index] = 1
             # print('mask: {}'.format(mask.size()))
 
@@ -118,9 +276,9 @@ class EncoderRNN(BaseRNN):
             # print('c: {}'.format(c.size()))
             r_att = self.linear_out(torch.cat([c, r], 2))
             # print('r_att: {}'.format(r_att.size()))
-            enc_outputs = torch.sigmoid(r_att).mul(r)
-            # print('enc_outputs: {}'.format(enc_outputs.size()))
-            mean = torch.mean(enc_outputs, dim=1).unsqueeze(0)
+            enc_hidden = torch.sigmoid(r_att).mul(r)
+            # print('enc_hidden: {}'.format(enc_hidden.size()))
+            mean = torch.mean(enc_hidden, dim=1).unsqueeze(0)
             # print('mean: {}'.format(mean.size()))
 
             # enc_state_h = self.bridge_h(mean)
@@ -130,8 +288,13 @@ class EncoderRNN(BaseRNN):
             else:
                 enc_state = mean
 
-
         if self.field_cat_pos:
-            return enc_outputs, embed_input, embed_field_pos, embed_pos, enc_state, (enc_mask, enc_non_stop_mask)
-        else:
-            return enc_outputs, embed_input, embed_field, embed_pos, enc_state, (enc_mask, enc_non_stop_mask)
+            embed_field = embed_field_pos
+
+        enc_masks = (enc_mask, enc_non_stop_mask)
+        enc_outputs = (enc_hidden, embed_input, embed_field, embed_pos, enc_state, enc_masks)
+
+        enc_keys, enc_vals, f_matrix = self._build_memory_key_values(enc_outputs)
+        dec_state = self._state_bridge(enc_state)
+
+        return enc_outputs, enc_keys, enc_vals, f_matrix, dec_state
