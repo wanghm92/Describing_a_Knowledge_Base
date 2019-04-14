@@ -479,6 +479,7 @@ class DecoderRNN(BaseRNN):
         enc_seq_mask, _ = enc_masks
         enc_hidden_keys, enc_input_keys, enc_field_keys = enc_keys
         enc_hidden_vals, enc_input_vals, enc_field_vals = enc_vals
+        # print('enc_hidden_keys: {}'.format(enc_hidden_keys.size()))
 
         if forward_mode == 'pred':
             return self.evaluate(batch_size, max_tail_oov,
@@ -497,7 +498,9 @@ class DecoderRNN(BaseRNN):
             for step in range(chunk_len):
 
                 target_id = targets_ids[:, step+chunk_start+1]  # 0th token is <SOS>, [batch] of ids of next word
+                # print(target_id)
                 target_step_mask = target_id.eq(self.pad_id).detach()  # non-padding tokens
+                # print(target_step_mask)
 
                 dec_hidden = dec_outs[:, step, :]
                 decoder_input = dec_inp_chunk[:, step, :]
@@ -526,6 +529,8 @@ class DecoderRNN(BaseRNN):
                         cov_losses.append(_cov_loss.sum(1))
                 else:
                     logits = logits_or_probs
+                    # print('target_id: {}'.format(target_id.size()))
+                    # print('logits: {}'.format(logits.size()))
                     _step_loss = self.criterion(logits, target_id)
 
                 _step_loss.masked_fill_(target_step_mask.data.byte(), 0)
@@ -589,8 +594,11 @@ class DecoderRNN(BaseRNN):
             if self.decoder_type != 'pt' and not self.unk_gen:
                 vocab_probs[:, self.unk_id] = 0  # NOTE: not allow decoder to output UNK
 
-            if self.decoder_type == 'pt' and step < self.min_length:
-                vocab_probs.masked_fill_(enc_non_stop_mask.data.byte(), 0.0)
+            if step < self.min_length:
+                if self.decoder_type == 'pt':
+                    vocab_probs.masked_fill_(enc_non_stop_mask.data.byte(), 0.0)
+                else:
+                    vocab_probs[:, 2] = 0
 
             probs, symbols_or_positions = vocab_probs.topk(1)  # greedy decoding: get word indices and probs
 
