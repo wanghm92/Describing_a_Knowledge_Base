@@ -39,13 +39,17 @@ class Seq2seq(nn.Module):
 
             self.batch_size, self.max_enc_len = batch_s.size()
 
-            return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_sum, batch_o_sum, source_len, max_tail_oov, w2fs
+            return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_sum, batch_o_sum, \
+                   source_len, max_tail_oov, w2fs
         else:
-            batch_t, batch_o_t, batch_f_t, batch_pf_t, batch_pb_t, _ = outline_package
+            batch_t, batch_o_t, batch_f_t, batch_pf_t, batch_pb_t, _ = [x[:, 1:-1] for x in outline_package]
 
             self.batch_size, self.max_enc_len = batch_t.size()
 
-            return batch_t, batch_o_t, batch_f_t, batch_pf_t, batch_pb_t, batch_sum, batch_o_sum, outline_len, max_tail_oov, w2fs
+            outline_len_real = [x-1 for x in outline_len]  # minius the <SOS> in front
+
+            return batch_t, batch_o_t, batch_f_t, batch_pf_t, batch_pb_t, batch_sum, batch_o_sum, \
+                   outline_len_real, max_tail_oov, w2fs
 
     def coverage_init(self):
         if self.decoder.use_cov_loss or self.decoder.use_cov_attn:
@@ -125,9 +129,11 @@ class Seq2seq(nn.Module):
     def _backprop(self, loss, total_norm, retain_graph=False):
         self.optimizer.zero_grad()
         loss.backward(retain_graph=retain_graph)
-        for p in list(filter(lambda p: p.grad is not None, self.parameters())):
-            param_norm = p.grad.data.norm(2)
-            total_norm += param_norm.item() ** 2
+        for n, p in self.named_parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                # print("[Gradient_L2Norm] {}: {}".format(n, param_norm))
+                total_norm += param_norm.item() ** 2
         total_norm = total_norm ** (1. / 2)
         nn.utils.clip_grad_norm_(self.parameters(), self.max_grad_norm)
         self.optimizer.step()
