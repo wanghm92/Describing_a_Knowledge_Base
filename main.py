@@ -187,52 +187,54 @@ def train(t_dataset, t4e_dataset, v_dataset, model, n_epochs, load_epoch=0):
 
     epoch = load_epoch
     while True:
-        '''
+        # '''
         # ------------------------------------------------------------------------------------------ #
         # ----------------------------------- Eval on Valid set ------------------------------------ #
         # ------------------------------------------------------------------------------------------ #
         L.info("Validation Epoch - {}".format(epoch))
         valid_f = Validator(model=model, v_dataset=v_dataset, use_cuda=args.cuda)
         valid_loss, num_valid_expls = valid_f.valid(epoch, src=args.src)
-        if epoch > 0:
-            for mdl, vloss in valid_loss.items():
-                vloss /= num_valid_expls
-                L.info('Inference Result:')
-                L.info('[{}] valid_loss: {}'.format(mdl, vloss))
+        for mdl, vloss in valid_loss.items():
+            vloss /= num_valid_expls
+            L.info('Inference Result:')
+            L.info('[{}] valid_loss: {}'.format(mdl, vloss))
+            if epoch > 0:
                 writer.add_scalar('loss/{}/valid'.format(mdl), vloss, epoch)
 
         # ------------------------------------------------------------------------------------------ #
         # --------------------------------- Inference on Valid set --------------------------------- #
         # ------------------------------------------------------------------------------------------ #
-        L.info("Inference Epoch - {}".format(epoch))
+        L.info("Inference Epoch (valid set) - {}".format(epoch))
         predictor = Predictor(model=model, vocab=v_dataset.vocab, use_cuda=args.cuda,
                               decoder_type=args.dec_type, unk_gen=config.unk_gen, dataset_type=args.type)
         valid_results = predictor.inference(v_dataset, save_dir=save_file_dir, src=args.src)
         for mdl, results in valid_results.items():
             cand, ref, valid_ppl, others = results
-            if epoch > 0:
-                L.info('[{}] Valid set Result:'.format(mdl))
-                L.info('[{}] valid_ppl: {}'.format(mdl, valid_ppl))
-                writer.add_scalar('{}/perplexity/valid'.format(mdl), valid_ppl, epoch)
-                writer.add_scalar('{}/output_len/valid'.format(mdl), others[-1], epoch)
+            L.info('[{}] Valid set Result:'.format(mdl))
+            L.info('[{}] valid_ppl: {}'.format(mdl, valid_ppl))
             valid_scores = print_save_metrics(args, config, metrics, epoch, v_dataset, save_file_dir,
                                               cand, ref, others, live=True, mdl=mdl)
-            metrics.run_logger(writer=writer, epoch=epoch)
+            if epoch > 0:
+                writer.add_scalar('{}/perplexity/valid'.format(mdl), valid_ppl, epoch)
+                writer.add_scalar('{}/output_len/valid'.format(mdl), others[-1], epoch)
+
+                metrics.run_logger(writer=writer, epoch=epoch)
 
         # ------------------------------------------------------------------------------------------ #
         # ---------------------------- Eval and Metrics on Training set ---------------------------- #
         # ------------------------------------------------------------------------------------------ #
+        L.info("Inference Epoch (training set) - {}".format(epoch))
         train_results = predictor.inference(t4e_dataset, save_dir=save_file_dir)
-        for mdl, results in train_results.items():
-            cand, ref, train_ppl, others = results
-            if epoch > 0:
+        if epoch > 0:
+            for mdl, results in train_results.items():
+                cand, ref, train_ppl, others = results
                 L.info('[{}] Train set Result:'.format(mdl))
                 L.info('[{}] train_ppl: {}'.format(mdl, train_ppl))
                 writer.add_scalar('{}/perplexity/train'.format(mdl), train_ppl, epoch)
                 writer.add_scalar('{}/output_len/train'.format(mdl), others[-1], epoch)
-            _ = print_save_metrics(args, config, metrics, epoch, t4e_dataset, save_file_dir,
-                                   cand, ref, others, live=True, save=False)
-            metrics.run_logger(writer=writer, epoch=epoch, cat='train_metrics/{}'.format(mdl))
+                _ = print_save_metrics(args, config, metrics, epoch, t4e_dataset, save_file_dir, cand, ref, others,
+                                       live=True, save=False)
+                metrics.run_logger(writer=writer, epoch=epoch, cat='train_metrics/{}'.format(mdl))
 
         # ------------------------------------------------------------------------------------------ #
         # ------------------------------------------ save ------------------------------------------ #
