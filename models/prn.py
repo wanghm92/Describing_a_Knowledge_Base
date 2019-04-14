@@ -38,14 +38,14 @@ class PRN(nn.Module):
                batch_sum, batch_o_sum, \
                source_len, outline_len, summary_len, max_tail_oov, w2fs
 
-    def forward(self, data_packages, remaining, forward_mode='train', fig=False, src='full'):
+    def forward(self, data_packages, remaining, forward_mode='train', fig=False, src=None):
         """
             batch_data: input word feature index tensors and output word index features
             remaining: source_len, outline_len, summary_len, max_tail_oov, w2fs, batch_idx2oov
         """
 
         planner_output = self.planner(data_packages, remaining, forward_mode=forward_mode)
-        realizer_output = self.realizer(data_packages, remaining, forward_mode=forward_mode, src=src)
+        realizer_output = self.realizer(data_packages, remaining, forward_mode=forward_mode, src='outline')
         if forward_mode != 'pred':
             return {'prn-planner': list(planner_output.values())[0],
                     'prn-realizer': list(realizer_output.values())[0]}
