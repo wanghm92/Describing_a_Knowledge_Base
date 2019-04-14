@@ -66,7 +66,7 @@ class EncoderRNN(BaseRNN):
         # ----------------- params for encoder memory keys ----------------- #
         enc_hidden_size = self.hidden_size * self.directions
         field_input_size = self.fdsize
-        # print('enc_input_size: {}'.format(enc_input_size))
+        # print('input_size: {}'.format(self.input_size))
         if self.attn_level > 1 and self.field_cat_pos:
             field_input_size += self.posit_size
         # print('field_input_size: {}'.format(field_input_size))
@@ -98,6 +98,8 @@ class EncoderRNN(BaseRNN):
         # TODO: this bridge should have Relu/Elu
         if self.directions == 2:
             self.W_enc_state = nn.Linear(hidden_size * 2, hidden_size)
+        else:
+            self.W_enc_state = nn.Linear(hidden_size, hidden_size)
 
     def _get_enc_keys(self, enc_hidden, enc_input, enc_field, batch_size, max_enc_len):
         """
@@ -242,6 +244,7 @@ class EncoderRNN(BaseRNN):
             else:
                 enc_hidden, _ = nn.utils.rnn.pad_packed_sequence(enc_hidden, batch_first=True)
                 enc_hidden = enc_hidden.contiguous()
+            # print('enc_hidden: {}'.format(enc_hidden.size()))
 
         elif self.enc_type == 'fc':
             batch, source_len, _ = embedded.size()
@@ -279,6 +282,7 @@ class EncoderRNN(BaseRNN):
             enc_hidden = torch.sigmoid(r_att).mul(r)
             # print('enc_hidden: {}'.format(enc_hidden.size()))
             mean = torch.mean(enc_hidden, dim=1).unsqueeze(0)
+            mean = self.W_enc_state(mean)
             # print('mean: {}'.format(mean.size()))
 
             # enc_state_h = self.bridge_h(mean)
