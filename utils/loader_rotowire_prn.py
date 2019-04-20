@@ -7,6 +7,37 @@ from tqdm import tqdm
 import numpy as np
 from utils.content_metrics import Content_Metrics
 
+# TODO: change replace 2-word team/city names in summary with 1 word joint with "_" delimiter
+# TODO: tokenization errors: #PT, 's,
+# TODO: player score feature: is_max, or the sequence
+# TODO: table2csv
+# TODO: sort the table records, e.g. winning team in front, starting players in front, higher scores in front
+# TODO: mask/replace with placeholder for numbers, team names, player names from word vocab to force copy
+# TODO: disable repetition on stats; allow for team names/cities
+# TODO: Spurs’, Thunders’
+# TODO: double-double, triple-double
+
+"""
+After examining just a few data samples, the problem of information deficiency is very severe in the rotowire
+dataset.
+
+TODOs:
+(1) Small sample crowd-sourcing labeling to estimate the percentage of sentences containing full/partial content
+that is missing from the table
+
+(2) After removing this source of Hallucination, adding back features, run baseline seq-seq model
+
+(3) Improved encoder, graph construction/ graph pruning mechanisms to improve the performance
+
+(4) Simple mechanisms to prevent hallucination
+
+(5) Experiments:
+    i)   Masking out all values not available from the table to <NUM>
+    ii)  Removing all sentences with missing information
+    iii) etc
+    
+"""
+
 class Vocabulary:
     """Vocabulary class for mapping between words and ids"""
     def __init__(self,
@@ -338,7 +369,7 @@ class Table2text_seq:
 
     def load_vocab(self, path):
         print("Loading data ** LIGHT ** from {}".format(path))
-        prefix = "{}/table2text_nlg/describe_kb/outputs".format(HOME)
+        prefix = "{}/table2text_nlg/describe_kb/outputs_old".format(HOME)
         vocab_path_pkl = "{}/rotowire_vocab_prn.pkl".format(prefix)
         print("loading vocab ... from {}".format(vocab_path_pkl))
         with open(vocab_path_pkl, 'rb') as fin:
@@ -355,7 +386,7 @@ class Table2text_seq:
 
         # TODO: add TEAM/PLAYER feature
 
-        prefix = "{}/table2text_nlg/describe_kb/outputs".format(HOME)
+        prefix = "{}/table2text_nlg/describe_kb/outputs_old".format(HOME)
         print("Loading data from {}".format(path))
         # (qkey, qitem, index)
         with open(path, 'rb') as fin:
