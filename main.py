@@ -11,11 +11,13 @@ from models.prn import PRN
 from configurations import Config, ConfigSmall, ConfigTest, ConfigWikibio, ConfigRotowire
 from metrics import Metrics
 from validator import Validator
-import random, os, pprint, logging, time
+import random, os, logging, time
+from pprint import pprint
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 import numpy as np
 from utils.miscs import print_save_metrics
+from utils.miscs import sanity_check
 
 program = os.path.basename(sys.argv[0])
 L = logging.getLogger(program)
@@ -52,6 +54,8 @@ parser.add_argument('--dec_type', type=str, default='pg', choices=['pg', 'pt', '
                     help='decoder model type pg(pointer-generator)/pt(pointer-net)(WIP)/seq(seq2seq)')
 parser.add_argument('--enc_type', type=str, default='rnn', choices=['rnn', 'fc', 'trans'],
                     help='encoder model type')
+parser.add_argument('--input_feeding', action='store_true',
+                    help='whether use input_feeding for decoder')
 
 parser.add_argument('--attn_type', type=str, default='cat', choices=['cat', 'dot'],
                     help='type of attention score calculation: cat, dot')
@@ -138,9 +142,7 @@ else:
     config = Config()
     from utils.loader import Table2text_seq
 
-# config = ConfigTest()
-print("\n***config: ")
-pprint.pprint(vars(config), indent=2)
+sanity_check(args, config)
 
 summary_dir = os.path.join(save_file_dir, "summary")
 if not os.path.exists(summary_dir):
@@ -157,9 +159,6 @@ if args.type == 1:
     filepost += "_A.txt"
 else:
     filepost += "_P.txt"
-
-print("\n***args: ")
-pprint.pprint(vars(args), indent=2)
 
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------ Training Functions ------------------------------------------ #
@@ -396,7 +395,7 @@ if __name__ == "__main__":
                                  rnn_cell=config.cell, directions=config.directions,
                                  attn_src=args.attn_src, attn_level=args.attn_level,
                                  attn_type=args.attn_type, attn_fuse=args.attn_fuse,
-                                 ptr_dec_feat=args.ptr_dec_feat,
+                                 ptr_dec_feat=args.ptr_dec_feat, input_feeding=args.input_feeding,
                                  use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
                                  field_self_att=args.field_self_att, field_cat_pos=args.field_cat_pos,
                                  field_context=args.field_context, context_mlp=args.context_mlp,
@@ -417,7 +416,7 @@ if __name__ == "__main__":
                                  rnn_cell=config.cell, directions=config.enc_otl_dir,
                                  attn_src=args.attn_src, attn_level=args.attn_level,
                                  attn_type=args.attn_type, attn_fuse=args.attn_fuse,
-                                 ptr_dec_feat=args.ptr_dec_feat,
+                                 ptr_dec_feat=args.ptr_dec_feat, input_feeding=args.input_feeding,
                                  use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
                                  field_self_att=args.field_self_att, field_cat_pos=args.field_cat_pos,
                                  field_context=args.field_context, context_mlp=args.context_mlp,
@@ -427,8 +426,8 @@ if __name__ == "__main__":
                                  embedding=embedding, field_embedding=field_embedding, pos_embedding=pos_embedding)
 
         # full model
-        planner = PointerNet(encoder_all, decoder_otl, config).to(device)
-        realizer = Seq2seq(encoder_otl, decoder_sum, config).to(device)
+        planner = PointerNet(encoder_all, decoder_otl, config, input_feeding=args.input_feeding).to(device)
+        realizer = Seq2seq(encoder_otl, decoder_sum, config, input_feeding=args.input_feeding).to(device)
         model = PRN(planner, realizer, config).to(device)
 
     else:
@@ -457,7 +456,7 @@ if __name__ == "__main__":
                              rnn_cell=config.cell, directions=config.directions,
                              attn_src=args.attn_src, attn_level=args.attn_level,
                              attn_type=args.attn_type, attn_fuse=args.attn_fuse,
-                             ptr_dec_feat=args.ptr_dec_feat,
+                             ptr_dec_feat=args.ptr_dec_feat, input_feeding=args.input_feeding,
                              use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
                              field_self_att=args.field_self_att, field_cat_pos=args.field_cat_pos,
                              field_context=args.field_context, context_mlp=args.context_mlp,
@@ -467,7 +466,7 @@ if __name__ == "__main__":
                              embedding=embedding, field_embedding=field_embedding, pos_embedding=pos_embedding)
 
         if args.dec_type in ['pg', 'seq']:
-            model = Seq2seq(encoder, decoder, config).to(device)
+            model = Seq2seq(encoder, decoder, config, input_feeding=args.input_feeding).to(device)
         elif args.dec_type == 'pt':
             model = PointerNet(encoder, decoder, config).to(device)
 
@@ -500,9 +499,9 @@ if __name__ == "__main__":
                         else:
                             params_dict["[{}][Uniform: 1/dim*0.5] {}".format(name_prefix, name_suffix)] = param.size()
 
-        pprint.pprint(params_dict, indent=2)
+        pprint(params_dict, indent=2)
     else:
-        pprint.pprint(model.named_parameters(), indent=2)
+        pprint(model.named_parameters(), indent=2)
 
     # ------------------------------------------------------------------------------------------ #
     # --------------------------------------- train -------------------------------------------- #

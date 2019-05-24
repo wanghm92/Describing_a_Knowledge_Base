@@ -281,11 +281,10 @@ class EncoderRNN(BaseRNN):
             # print('r_att: {}'.format(r_att.size()))
             enc_hidden = torch.sigmoid(r_att).mul(r)
             # print('enc_hidden: {}'.format(enc_hidden.size()))
-            mean = torch.mean(enc_hidden, dim=1).unsqueeze(0)
-            mean = self.W_enc_state(mean)
+            mean = torch.mean(enc_hidden, dim=1).unsqueeze(0)  # (num_layers * num_directions, batch, hidden_size)
+            # mean = self.W_enc_state(mean)
             # print('mean: {}'.format(mean.size()))
 
-            # enc_state_h = self.bridge_h(mean)
             if self.rnn_type.lower() == 'lstm':
                 # enc_state_c = self.bridge_c(mean)
                 enc_state = (mean, mean)

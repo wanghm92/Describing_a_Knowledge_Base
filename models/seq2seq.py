@@ -6,7 +6,7 @@ from utils.miscs import Scheduler, detach_state
 
 class Seq2seq(nn.Module):
 
-    def __init__(self, encoder, decoder, config):
+    def __init__(self, encoder, decoder, config, input_feeding):
         super(Seq2seq, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
@@ -18,6 +18,7 @@ class Seq2seq(nn.Module):
         self.max_enc_len = 0
         self.max_length = 1
         self.decoder_type = self.decoder.decoder_type
+        self.input_feeding = input_feeding
 
     def flatten_parameters(self):
         self.encoder.rnn.flatten_parameters()
@@ -87,12 +88,12 @@ class Seq2seq(nn.Module):
                 chunk_len = min(tbptt, self.max_length - chunk_start)
                 targets = batch_sum[:, chunk_start:chunk_start + chunk_len]
                 dec_inp_chunk = decoder_inputs[:, chunk_start:chunk_start + chunk_len, :]
-                dec_outs, dec_state = self.decoder.rnn(dec_inp_chunk, dec_state)
             else:
                 chunk_len = 0
                 targets = self.targets_init()
+                # print('targets: {}'.format(targets.size()))
                 dec_inp_chunk = self.decoder.embedding(targets)
-                dec_outs, dec_state = None, None
+                dec_state = None
 
             result = self.decoder(max_tail_oov=max_tail_oov,
                                   targets=targets,
@@ -111,12 +112,11 @@ class Seq2seq(nn.Module):
                                   max_enc_len=self.max_enc_len,
                                   chunk_start=chunk_start,
                                   chunk_len=chunk_len,
-                                  dec_inp_chunk=dec_inp_chunk,
-                                  dec_outs=dec_outs)
+                                  dec_inp_chunk=dec_inp_chunk)
 
             if forward_mode != 'pred':
+                mean_batch_loss, coverage, dec_state = result
                 dec_state = detach_state(dec_state)
-                mean_batch_loss, coverage = result
                 chunk_losses += mean_batch_loss.item()
                 retain_graph = chunk_idx < (len(chunk_ranges)-1)
                 if forward_mode == 'train':

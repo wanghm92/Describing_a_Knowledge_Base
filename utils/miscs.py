@@ -1,5 +1,7 @@
 import numpy as np
+import torch
 from torch.optim.lr_scheduler import *
+from pprint import pprint
 
 DELIM = u"￨"
 
@@ -135,3 +137,19 @@ def detach_state(h):
         return h.detach()
     else:
         return tuple(detach_state(v) for v in h)
+
+def sanity_check(args, config):
+    if args.dec_type == 'prn':
+        if args.enc_type == 'rnn':
+            raise ValueError("args.enc_type == rnn and args.dec_type == prn is not allowed")
+        else:
+            if config.directions == 2:
+                print("[***WARNING***]"
+                      "args.enc_type == fc and args.dec_type == prn and config.directions == 2 is not allowed"
+                      "Changing it to 1")
+                config.directions = 1
+
+    print("\n***args: ")
+    pprint(vars(args), indent=2)
+    print("\n***config: ")
+    pprint(vars(config), indent=2)

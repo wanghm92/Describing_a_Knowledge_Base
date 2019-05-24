@@ -34,7 +34,7 @@ class ConfigWikibio(object):
         self.max_len = 100
         self.unk_gen = True  # allow generating UNK
 
-class ConfigRotowire(object):
+class ConfigRotowire_new(object):
     def __init__(self):
         self.cell = "LSTM"
         self.optimizer = "adam"
@@ -50,10 +50,10 @@ class ConfigRotowire(object):
         self.nlayers = 1
         self.lr = 0.0002
         self.epochs = 30
-        self.batch_size = 4
+        self.batch_size = 16
         self.valid_batch = 64
         self.dropout = 0.3
-        self.directions = 1
+        self.directions = 2
         self.enc_otl_dir = 2
         self.max_grad_norm = 5
         self.max_len = 80
@@ -64,17 +64,18 @@ class ConfigRotowire(object):
         self.scheduler = 'exp'
         self.tbptt = 100
 
-class ConfigRotowire_bk(object):
+class ConfigRotowire(object):
     def __init__(self):
         self.cell = "LSTM"
         self.optimizer = "adam"
-        self.decay_rate = 0.97
-        self.decay_start = 4
+        self.decay_rate = 0.95
+        self.decay_start = 1
         self.emsize = 600
         self.fdsize = 600
         self.rcdsize = 600
         self.hasize = 600
         self.hdsize = 600
+        self.attn_size = 0
         self.pemsize = 5
         self.nlayers = 1
         self.lr = 0.0002
@@ -82,11 +83,16 @@ class ConfigRotowire_bk(object):
         self.batch_size = 4
         self.valid_batch = 64
         self.dropout = 0.3
-        self.directions = 1
+        self.directions = 2
+        self.enc_otl_dir = 2
         self.max_grad_norm = 5
         self.max_len = 80
+        self.max_sum_len = 500
         self.min_len = 35
+        self.min_sum_len = 350
         self.unk_gen = True  # allow generating UNK
+        self.scheduler = 'exp'
+        self.tbptt = 100
 
 class ConfigSmall(object):
     def __init__(self):

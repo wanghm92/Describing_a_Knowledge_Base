@@ -77,9 +77,6 @@ class PointerNet(Seq2seq):
             if self.decoder.ptr_dec_feat and self.decoder.ptr_feat_merge == 'mlp':
                 decoder_inputs = self.decoder.dropout(self.decoder.input_mlp(decoder_inputs))
 
-        if forward_mode != 'pred':
-            dec_outs, dec_state = self.decoder.rnn(decoder_inputs, dec_state)
-
         total_norm = 0.0
         result = self.decoder(max_tail_oov=max_tail_oov,
                               targets=targets,
@@ -97,11 +94,10 @@ class PointerNet(Seq2seq):
                               batch_size=self.batch_size,
                               max_enc_len=self.max_enc_len,
                               chunk_len=self.max_length,
-                              dec_inp_chunk=decoder_inputs,
-                              dec_outs=dec_outs)
+                              dec_inp_chunk=decoder_inputs)
 
         if forward_mode != 'pred':
-            mean_batch_loss, _ = result
+            mean_batch_loss, _, _ = result
             if forward_mode == 'train':
                 total_norm = self._backprop(mean_batch_loss, total_norm, retain_graph=retain_graph)
 

@@ -3,7 +3,6 @@ import pickle, json, argparse, sys, pprint
 from os.path import expanduser
 HOME = expanduser("~")
 prefix = "{}/table2text_nlg/data/dkb/".format(HOME)
-pp = pprint.PrettyPrinter(indent=4)
 
 class Read_file:
     """Read table and description files"""
@@ -63,7 +62,6 @@ class Read_file:
                 if i % 100 == 0:
                     sys.stdout.write("Parsed {} lines\r".format(i))
                 temp_table = json.loads(line.strip('\n'))
-                # pp.pprint(temp_table)
 
                 table, target, retain, field = self.trim_and_filter_table(temp_table)
                 if retain:

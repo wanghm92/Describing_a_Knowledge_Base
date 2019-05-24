@@ -7,7 +7,7 @@ from tqdm import tqdm
 import numpy as np
 from utils.content_metrics import Content_Metrics
 
-# TODO: change replace 2-word team/city names in summary with 1 word joint with "_" delimiter
+# TODO: [Done] change replace 2-word team/city names in summary with 1 word joint with "_" delimiter
 # TODO: tokenization errors: #PT, 's,
 # TODO: player score feature: is_max, or the sequence
 # TODO: table2csv
@@ -15,7 +15,8 @@ from utils.content_metrics import Content_Metrics
 # TODO: mask/replace with placeholder for numbers, team names, player names from word vocab to force copy
 # TODO: disable repetition on stats; allow for team names/cities
 # TODO: Spurs’, Thunders’
-# TODO: double-double, triple-double
+
+# NOTE: quickly prototype to verify the idea works before doing anything fancy
 
 """
 After examining just a few data samples, the problem of information deficiency is very severe in the rotowire
@@ -36,6 +37,9 @@ that is missing from the table
     ii)  Removing all sentences with missing information
     iii) etc
     
+(6) Supervised attention + switch loss + force copying
+    
+(7) Table-reconstruction loss: attend to field+rcd_type+HA+othe_features and predict the position
 """
 
 class Vocabulary:
@@ -279,7 +283,8 @@ class Table2text_seq:
     def __init__(self, data_src, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available(),
                  train_mode=False, dec_type='pg'):
         # TODO: change the path
-        prefix = "{}/table2text_nlg/data/dkb/rotowire_prn/".format(HOME)
+        # prefix = "{}/table2text_nlg/data/dkb/rotowire_prn/".format(HOME)
+        prefix = "/mnt/bhd/hongmin/table2text_nlg/datasets/dkb/rotowire_prn/"
 
         assert type == 3
         self.vocab = None
@@ -386,7 +391,8 @@ class Table2text_seq:
 
         # TODO: add TEAM/PLAYER feature
 
-        prefix = "{}/table2text_nlg/describe_kb/outputs_old".format(HOME)
+        # prefix = "{}/table2text_nlg/describe_kb/outputs_old".format(HOME)
+        prefix = "/mnt/bhd/hongmin/table2text_nlg/describe_kb/outputs_old"
         print("Loading data from {}".format(path))
         # (qkey, qitem, index)
         with open(path, 'rb') as fin:
