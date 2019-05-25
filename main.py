@@ -34,7 +34,7 @@ parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
 parser.add_argument('--cuda', action='store_false',
                     help='use CUDA')
-parser.add_argument('--save', type=str, default='params.pkl',
+parser.add_argument('--save', type=str, default='/mnt/bhd/hongmin/table2text_nlg/output/temp/model.pkl',
                     help='path to save the final model')
 parser.add_argument('--dataset', type=str, default='valid', choices=['test', 'valid'],
                     help='type of dataset for prediction')
@@ -144,7 +144,7 @@ else:
 
 sanity_check(args, config)
 
-summary_dir = os.path.join(save_file_dir, "summary")
+summary_dir = os.path.join(save_file_dir, "events")
 if not os.path.exists(summary_dir):
     os.mkdir(summary_dir)
 writer = SummaryWriter(summary_dir)

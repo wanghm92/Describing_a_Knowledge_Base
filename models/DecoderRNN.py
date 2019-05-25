@@ -641,6 +641,7 @@ class DecoderRNN(BaseRNN):
             if self.decoder_type != 'pt' and not self.unk_gen:
                 vocab_probs[:, self.unk_id] = 0  # NOTE: not allow decoder to output UNK
 
+            # mask the probability of <eos> when shorter than min_length
             if step < self.min_length:
                 if self.decoder_type == 'pt':
                     vocab_probs.masked_fill_(enc_non_stop_mask.data.byte(), 0.0)
@@ -686,7 +687,9 @@ class DecoderRNN(BaseRNN):
                 for i in range(symbols.size(0)):
                     w2f = w2fs[i]
                     if symbols[i].item() > self.vocab_size-1:
-                        symbols[i] = w2f[symbols[i].item()]
+                        # symbols[i] = w2f[symbols[i].item()]
+                        symbols[i] = self.unk_id  # TODO: w2f[symbols[i].item()] is UNK anyway, change if disallow UNK
+
             # symbols.masked_fill_((symbols > self.vocab_size-1), self.unk_id)
             if self.decoder_type == 'pt':
                 locations.append(positions.clone())

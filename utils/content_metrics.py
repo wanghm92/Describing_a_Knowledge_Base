@@ -37,11 +37,15 @@ class Content_Metrics(object):
     def __call__(self, pred_ids, dataset):
         gold_triples = dataset.gold_triples
         pred_triples = dataset._get_pred_triples(pred_ids)
-        try:
-            assert len(gold_triples) == len(pred_triples)
-        except AssertionError:
-            sys.exit("len(gold_triples) = {} but len(pred_triples) = {}".format(len(gold_triples), len(pred_triples)))
-
+        if not len(gold_triples) == len(pred_triples):
+            print("\n****WARNING****\nlen(gold_triples) = {} but len(pred_triples) = {}\n*************\n"
+                   .format(len(gold_triples), len(pred_triples)))
+            user_input = input("Continue?[y/n]")
+            if user_input == 'y':
+                print("Cutting gold_triples to len = {}".format(len(pred_triples)))
+                gold_triples = gold_triples[:len(pred_triples)]
+            else:
+                sys.exit(0)
         precision, recall, f1 = self.f1(pred_triples, gold_triples)
         avg_score = self.dld(pred_triples, gold_triples)
         return precision, recall, f1, avg_score

@@ -15,6 +15,7 @@ from utils.content_metrics import Content_Metrics
 # TODO: mask/replace with placeholder for numbers, team names, player names from word vocab to force copy
 # TODO: disable repetition on stats; allow for team names/cities
 # TODO: Spurs’, Thunders’
+# TODO: (1) enrich content plan tks (2) get pointers, for both full table and content plan
 
 # NOTE: quickly prototype to verify the idea works before doing anything fancy
 
@@ -282,7 +283,6 @@ class Vocabulary:
 class Table2text_seq:
     def __init__(self, data_src, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available(),
                  train_mode=False, dec_type='pg'):
-        # TODO: change the path
         # prefix = "{}/table2text_nlg/data/dkb/rotowire_prn/".format(HOME)
         prefix = "/mnt/bhd/hongmin/table2text_nlg/datasets/dkb/rotowire_prn/"
 
@@ -327,10 +327,12 @@ class Table2text_seq:
     def prepare_content_metrics(self):
         domain = 'train' if 'train' in self.data_src else self.data_src
         self.content_metrics = Content_Metrics()
-        self.goldfi = "{}/table2text_nlg/harvardnlp/data2text-plan-py/rotowire/{}/roto-gold-{}.h5-tuples.txt".format(HOME, domain, domain)
+        self.goldfi = "{}/table2text_nlg/harvardnlp/data2text-plan-py/rotowire/{}/roto-gold-{}.h5-tuples.txt"\
+            .format(HOME, domain, domain)
         self.gold_triples = self._get_gold_triples()[1:]
 
-        self.src_file = "{}/table2text_nlg/harvardnlp/data2text-plan-py/rotowire/{}/src_{}.txt".format(HOME, domain, domain)
+        self.src_file = "{}/table2text_nlg/harvardnlp/data2text-plan-py/rotowire/{}/src_{}.txt"\
+            .format(HOME, domain, domain)
         inputs = []
         with io.open(self.src_file, 'r', encoding="utf-8") as fin:
             for _, line in enumerate(fin):
@@ -367,7 +369,9 @@ class Table2text_seq:
                     record_type = elements[2]
                     if not elements[2].startswith('TEAM'):
                         record_type = 'PLAYER-' + record_type
-                    eval_output.append((elements[1].replace("_", " ").strip('<').strip('>').lower(), elements[0], record_type))
+                    eval_output.append(
+                        (elements[1].replace("_", " ").strip('<').strip('>').lower(), elements[0], record_type)
+                    )
             eval_outputs.append(eval_output)
 
         return eval_outputs
@@ -380,7 +384,6 @@ class Table2text_seq:
         with open(vocab_path_pkl, 'rb') as fin:
             data = pickle.load(fin)
 
-        # TODO: include record type and H/A vocabs
         self.vocab = Vocabulary(word2idx=data["word2idx"], idx2word=data["idx2word"],
                                 field2idx=data["field2idx"], idx2field=data["idx2field"],
                                 rcd2idx=data["rcd2idx"], idx2rcd=data["idx2rcd"],
@@ -388,8 +391,6 @@ class Table2text_seq:
                                 dec_type=self.dec_type)
 
     def load_data(self, path):
-
-        # TODO: add TEAM/PLAYER feature
 
         # prefix = "{}/table2text_nlg/describe_kb/outputs_old".format(HOME)
         prefix = "/mnt/bhd/hongmin/table2text_nlg/describe_kb/outputs_old"
@@ -651,7 +652,8 @@ class Table2text_seq:
             # print("_lab_t ({}): {}".format(len(_lab_t), _lab_t))
             # print("_o_outline ({}): {}".format(len(_o_outline), _o_outline))
             # print(otl_len)
-            assert len(_outline) == len(_fields_t) == len(_rcd_t) == len(_ha_t) == len(_lab_t) == len(_o_outline) == otl_len
+            assert len(_outline) == len(_fields_t) == len(_rcd_t) \
+                   == len(_ha_t) == len(_lab_t) == len(_o_outline) == otl_len
             batch_t.append(_outline)
             batch_f_t.append(_fields_t)
             batch_pf_t.append(_rcd_t)
