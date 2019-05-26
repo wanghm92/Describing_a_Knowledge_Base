@@ -6,6 +6,8 @@ HOME = expanduser("~")
 from tqdm import tqdm
 import numpy as np
 from utils.content_metrics import Content_Metrics
+import functools
+print = functools.partial(print, flush=True)
 
 # TODO: [Done] change replace 2-word team/city names in summary with 1 word joint with "_" delimiter
 # TODO: tokenization errors: #PT, 's,

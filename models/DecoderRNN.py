@@ -3,6 +3,8 @@ import torch
 import sys
 import torch.nn as nn
 import torch.nn.functional as F
+import functools
+print = functools.partial(print, flush=True)
 
 from .baseRNN import BaseRNN
 # self.word2idx['<UNK>'] = 1

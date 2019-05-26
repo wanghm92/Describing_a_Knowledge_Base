@@ -67,7 +67,6 @@ class Seq2seq(nn.Module):
             batch_data: input word feature index tensors and output word index features
             remaining: source_len, outline_len, summary_len, max_tail_oov, w2fs, batch_idx2oov
         """
-
         batch_s, batch_o_s, batch_f, batch_pf, batch_pb, \
         batch_sum, batch_o_sum, \
         source_len, max_tail_oov, w2fs = \

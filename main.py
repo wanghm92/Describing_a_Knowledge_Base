@@ -18,6 +18,8 @@ from tqdm import tqdm
 import numpy as np
 from utils.miscs import print_save_metrics
 from utils.miscs import sanity_check
+import functools
+print=functools.partial(print, flush=True)
 
 program = os.path.basename(sys.argv[0])
 L = logging.getLogger(program)
@@ -95,7 +97,7 @@ parser.add_argument('--shuffle', action='store_true',
 
 parser.add_argument('--fig', action='store_true',
                     help='generate attention visualization figures for evaluation')
-parser.add_argument('--verbose', action='store_true',
+parser.add_argument('--verbose', action='store_false',
                     help='print sample outputs')
 parser.add_argument('--xavier', action='store_false',
                     help='xavier initialization')
@@ -217,7 +219,7 @@ def train(t_dataset, t4e_dataset, v_dataset, model, n_epochs, load_epoch=0):
                 writer.add_scalar('{}/perplexity/valid'.format(mdl), valid_ppl, epoch)
                 writer.add_scalar('{}/output_len/valid'.format(mdl), others[-1], epoch)
 
-                metrics.run_logger(writer=writer, epoch=epoch)
+                metrics.run_logger(writer=writer, epoch=epoch, cat='valid_metrics/{}'.format(mdl))
 
         # ------------------------------------------------------------------------------------------ #
         # ---------------------------- Eval and Metrics on Training set ---------------------------- #

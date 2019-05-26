@@ -1,6 +1,9 @@
 import sys
 from pyxdameraulevenshtein import normalized_damerau_levenshtein_distance
 from utils.text2num import text2num
+import functools
+print = functools.partial(print, flush=True)
+
 
 class Content_Metrics(object):
 

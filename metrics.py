@@ -139,7 +139,8 @@ class Metrics(object):
 
         return precision, recall, f1, ndld
 
-    def run_logger(self, writer, epoch, cat='valid_metrics'):
+    def run_logger(self, writer, epoch, cat):
+        assert cat is not None
         rouge_l = self.final_scores['ROUGE_L']
         bleu_1 = self.final_scores['Bleu_1']
         bleu_2 = self.final_scores['Bleu_2']
