@@ -7,6 +7,8 @@ import matplotlib.ticker as ticker
 from matplotlib.backends.backend_pdf import PdfPages
 from tqdm import tqdm
 np.set_printoptions(threshold=sys.maxsize)
+import functools
+print = functools.partial(print, flush=True)
 
 class Predictor(object):
     def __init__(self, model, vocab, use_cuda, decoder_type='pg', unk_gen=False, dataset_type=0, unk_id=3):
@@ -54,11 +56,14 @@ class Predictor(object):
             batch_idx2oov = remaining[-1]
 
             batch_pf = data_packages[0][-2]
-            if self.decoder_type in ['pt', 'prn']:
+            if self.decoder_type == 'pt':
                 lab_t = data_packages[1][-1]
                 targets = outlines
             else:
+                # ['seq', 'pg']
                 lab_t = None
+                if src == 'outline':
+                    sources = outlines
                 targets = summaries
 
             model_outputs = self.model(data_packages, remaining, fig=fig, forward_mode='pred', src=src)
