@@ -54,11 +54,13 @@ class Predictor(object):
             batch_idx2oov = remaining[-1]
 
             batch_pf = data_packages[0][-2]
-            if self.decoder_type in ['pt', 'prn']:
+            if self.decoder_type == 'pt':
                 lab_t = data_packages[1][-1]
                 targets = outlines
             else:
                 lab_t = None
+                if src == 'outline':
+                    sources = outlines
                 targets = summaries
 
             model_outputs = self.model(data_packages, remaining, fig=fig, forward_mode='pred', src=src)

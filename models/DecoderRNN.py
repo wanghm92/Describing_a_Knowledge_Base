@@ -17,7 +17,7 @@ class DecoderRNN(BaseRNN):
                  pad_id=0, sos_id=1, eos_id=2, unk_id=3,
                  rnn_cell='gru', directions=2,
                  attn_src='emb', attn_type='cat', attn_fuse='sum', attn_level=2,
-                 ptr_dec_feat=False,
+                 ptr_dec_feat=False, input_feeding=False,
                  use_cov_loss=True, use_cov_attn=True, cov_in_pgen=False,
                  field_self_att=False, field_cat_pos=False,
                  field_context=False, context_mlp=False,
@@ -56,6 +56,9 @@ class DecoderRNN(BaseRNN):
         self.field_embedding = field_embedding
         self.dataset_type = dataset_type
         self.ptr_dec_feat = ptr_dec_feat
+        self.input_feeding = input_feeding
+        self.hidden_size = hidden_size
+        self.embed_size = embed_size
         if self.dataset_type == 3:
             self.pos_embedding, self.rpos_embedding = pos_embedding
         else:
@@ -117,28 +120,28 @@ class DecoderRNN(BaseRNN):
             self.Wc = nn.Linear(1, hidden_size)  # e_t: coverage vector
 
         # ----------------- params for output ----------------- #
-        if self.decoder_type != 'pt':
-            output_layer_input_size = 0  # decoder state size
-            if self.attn_level == 3:
-                output_layer_input_size += (enc_hidden_size + embed_size)
-                if self.field_context:
-                    output_layer_input_size += field_input_size
-            elif self.attn_level == 2:
-                if self.field_context:
-                    output_layer_input_size += field_input_size
-                if self.attn_src == 'emb':
-                    output_layer_input_size += embed_size
-                elif self.attn_src == 'rnn':
-                    output_layer_input_size += enc_hidden_size
-            else:
+        # if self.decoder_type != 'pt':
+        output_layer_input_size = 0  # decoder state size
+        if self.attn_level == 3:
+            output_layer_input_size += (enc_hidden_size + embed_size)
+            if self.field_context:
+                output_layer_input_size += field_input_size
+        elif self.attn_level == 2:
+            if self.field_context:
+                output_layer_input_size += field_input_size
+            if self.attn_src == 'emb':
+                output_layer_input_size += embed_size
+            elif self.attn_src == 'rnn':
                 output_layer_input_size += enc_hidden_size
+        else:
+            output_layer_input_size += enc_hidden_size
 
-            # print('output_layer_input_size: {}'.format(output_layer_input_size))
-            if self.context_mlp:
-                self.V1 = nn.Linear(output_layer_input_size, hidden_size)
-                self.V2 = nn.Linear(hidden_size*2, self.output_size)
-            else:
-                self.V = nn.Linear(output_layer_input_size + hidden_size, self.output_size)
+        # print('output_layer_input_size: {}'.format(output_layer_input_size))
+        if self.context_mlp:
+            self.V1 = nn.Linear(output_layer_input_size, hidden_size)
+            self.V = nn.Linear(hidden_size*2, self.output_size)
+        else:
+            self.V = nn.Linear(output_layer_input_size + hidden_size, self.output_size)
 
         # ----------------- parameters for p_gen ----------------- #
         if self.decoder_type == 'pg':
@@ -163,8 +166,15 @@ class DecoderRNN(BaseRNN):
             elif self.ptr_input == 'hid':
                 self.input_size = hidden_size  # TODO: same hidden size for encoder and decoder for now, change
 
+        if self.input_feeding:
+            self.input_size += hidden_size
+
         self.rnn = self.rnn_cell(self.input_size, hidden_size, n_layers,
                                  batch_first=True, dropout=self.dropout_p)
+
+        if self.input_feeding and self.attn_level > 1 and not self.context_mlp:
+            raise ValueError("input_feeding = {}, attn_level = {}, context_mlp = {} is NOT ALLOWED"
+                             .format(self.input_feeding, self.attn_level, self.context_mlp))
 
 
     def _attn_score_cat(self, batch_size, max_enc_len, vt, dec_query, enc_keys, cov_vector, enc_mask, no_dup_mask=None):
@@ -403,7 +413,7 @@ class DecoderRNN(BaseRNN):
                                                      self.attn_type, no_dup_mask=no_dup_mask)
 
         if self.decoder_type == 'pt':
-            return logit_or_attn_scores[0], None, (None, None)
+            return logit_or_attn_scores[0], None, (None, None), None
         else:
             attn_scores = logit_or_attn_scores
             enc_output_context, enc_context_proj = self._get_contexts(attn_scores,
@@ -412,11 +422,9 @@ class DecoderRNN(BaseRNN):
             # print('enc_context_proj: {}'.format(enc_context_proj.size()))
 
             if self.context_mlp:
-                enc_output_context_rd = self.V1(enc_output_context)
-                out_vec = torch.cat((dec_hidden, enc_output_context_rd), 1)
-                out_vec = self.V2(out_vec)
-            else:
-                out_vec = self.V(torch.cat((dec_hidden, enc_output_context), 1))
+                enc_output_context = self.V1(enc_output_context)
+
+            out_vec = self.V(torch.cat((dec_hidden, enc_output_context), 1))
 
             attn_weights = attn_scores[0]
 
@@ -462,15 +470,15 @@ class DecoderRNN(BaseRNN):
                 # print('weighted_attn: {}'.format(weighted_attn.size()))
                 combined_vocab = combined_vocab.scatter_add(1, input_ids, weighted_attn)
                 # print('combined_vocab: {}'.format(combined_vocab.size()))
-                return combined_vocab, attn_weights, (p_gen, src_prob)
+                return combined_vocab, attn_weights, (p_gen, src_prob), enc_output_context
 
             elif self.decoder_type == 'seq':
-                return out_vec, attn_weights, (None, None)
+                return out_vec, attn_weights, (None, None), enc_output_context
 
     def forward(self, max_tail_oov=0, targets=None, targets_ids=None, input_ids=None, no_dup_mask=None,
                 enc_outputs=None, enc_keys=None, enc_vals=None, f_matrix=None, dec_state=None, coverage=None,
                 forward_mode='train', w2fs=None, fig=False, batch_size=0, max_enc_len=0,
-                chunk_len=0, chunk_start=0, dec_inp_chunk=None, dec_outs=None):
+                chunk_len=0, chunk_start=0, dec_inp_chunk=None):
         """
             targets=batch_t, targets_ids=batch_o_t, input_ids=batch_o_s
         """
@@ -494,6 +502,8 @@ class DecoderRNN(BaseRNN):
             step_losses, cov_losses = [], []
             dec_lens = (targets > self.pad_id).float().sum(1)
 
+            dec_outs, dec_state = self.rnn(dec_inp_chunk, dec_state)
+
             # step through decoder hidden states
             for step in range(chunk_len):
 
@@ -506,12 +516,13 @@ class DecoderRNN(BaseRNN):
                 decoder_input = dec_inp_chunk[:, step, :]
                 no_dup_mask_tensor = torch.from_numpy(no_dup_mask).cuda() if self.decoder_type == 'pt' else None
 
-                logits_or_probs, attn_weights, _ = self._decode_step(batch_size, input_ids, coverage, max_tail_oov,
-                                                                     dec_hidden, decoder_input,
-                                                                     enc_seq_mask, max_enc_len,
-                                                                     enc_hidden_keys, enc_input_keys, enc_field_keys,
-                                                                     enc_hidden_vals, enc_input_vals, enc_field_vals,
-                                                                     no_dup_mask=no_dup_mask_tensor)
+                logits_or_probs, attn_weights, _, enc_output_context = \
+                    self._decode_step(batch_size, input_ids, coverage, max_tail_oov,
+                                      dec_hidden, decoder_input,
+                                      enc_seq_mask, max_enc_len,
+                                      enc_hidden_keys, enc_input_keys, enc_field_keys,
+                                      enc_hidden_vals, enc_input_vals, enc_field_vals,
+                                      no_dup_mask=no_dup_mask_tensor)
 
                 if self.decoder_type == 'pg':
                     combined_vocab = logits_or_probs
@@ -547,7 +558,7 @@ class DecoderRNN(BaseRNN):
             if self.use_cov_loss:
                 # TODO: change coverage loss to be the same as nll loss ???
                 chunk_masked_loss = chunk_masked_loss + self.lmbda * torch.stack(cov_losses, 1).sum(1).div(dec_lens)
-            return chunk_masked_loss, coverage
+            return chunk_masked_loss, coverage, dec_state
 
     def evaluate(self, batch_size, max_tail_oov,
                  f_matrix, dec_state, enc_masks, input_ids, coverage,
@@ -573,16 +584,17 @@ class DecoderRNN(BaseRNN):
 
             no_dup_mask_tensor = torch.from_numpy(no_dup_mask).cuda() if self.decoder_type == 'pt' else None
 
-            logits_or_prob, attn_weights, (p_gen, src_prob) = self._decode_step(batch_size, input_ids, coverage,
-                                                                                max_tail_oov,
-                                                                                dec_hidden.squeeze(1),
-                                                                                decoder_input.squeeze(1),
-                                                                                enc_seq_mask, max_enc_len,
-                                                                                enc_hidden_keys, enc_input_keys,
-                                                                                enc_field_keys,
-                                                                                enc_hidden_vals, enc_input_vals,
-                                                                                enc_field_vals,
-                                                                                no_dup_mask=no_dup_mask_tensor)
+            logits_or_prob, attn_weights, (p_gen, src_prob), enc_output_context = \
+                self._decode_step(batch_size, input_ids, coverage,
+                                  max_tail_oov,
+                                  dec_hidden.squeeze(1),
+                                  decoder_input.squeeze(1),
+                                  enc_seq_mask, max_enc_len,
+                                  enc_hidden_keys, enc_input_keys,
+                                  enc_field_keys,
+                                  enc_hidden_vals, enc_input_vals,
+                                  enc_field_vals,
+                                  no_dup_mask=no_dup_mask_tensor)
 
             if self.decoder_type != 'pg':
                 vocab_probs = F.softmax(logits_or_prob, dim=1)
@@ -638,7 +650,8 @@ class DecoderRNN(BaseRNN):
                 for i in range(symbols.size(0)):
                     w2f = w2fs[i]
                     if symbols[i].item() > self.vocab_size-1:
-                        symbols[i] = w2f[symbols[i].item()]
+                        # symbols[i] = w2f[symbols[i].item()]
+                        symbols[i] = self.unk_id
             # symbols.masked_fill_((symbols > self.vocab_size-1), self.unk_id)
             if self.decoder_type == 'pt':
                 locations.append(positions.clone())

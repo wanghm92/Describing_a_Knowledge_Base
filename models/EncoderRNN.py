@@ -282,7 +282,7 @@ class EncoderRNN(BaseRNN):
             enc_hidden = torch.sigmoid(r_att).mul(r)
             # print('enc_hidden: {}'.format(enc_hidden.size()))
             mean = torch.mean(enc_hidden, dim=1).unsqueeze(0)
-            mean = self.W_enc_state(mean)
+            # mean = self.W_enc_state(mean)
             # print('mean: {}'.format(mean.size()))
 
             # enc_state_h = self.bridge_h(mean)
