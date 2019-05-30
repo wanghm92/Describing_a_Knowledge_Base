@@ -54,7 +54,7 @@ parser.add_argument('--max_len', type=int, default='100',
 
 parser.add_argument('--dec_type', type=str, default='pg', choices=['pg', 'pt', 'seq', 'prn'],
                     help='decoder model type pg(pointer-generator)/pt(pointer-net)(WIP)/seq(seq2seq)')
-parser.add_argument('--enc_type', type=str, default='rnn', choices=['rnn', 'fc', 'trans'],
+parser.add_argument('--enc_type', type=str, default='rnn', choices=['rnn', 'mean', 'trans'],
                     help='encoder model type')
 parser.add_argument('--input_feeding', action='store_true',
                     help='whether use input_feeding for decoder')

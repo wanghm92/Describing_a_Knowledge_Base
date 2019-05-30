@@ -18,7 +18,7 @@ class EncoderRNN(BaseRNN):
                  dataset_type=0, enc_type='rnn'):
 
         self.rnn_type = rnn_cell.lower()
-        super(EncoderRNN, self).__init__(vocab_size, hidden_size, dropout_p, n_layers)
+        super(EncoderRNN, self).__init__(enc_type, vocab_size, hidden_size, dropout_p, n_layers)
 
         self.attn_src = attn_src
         self.attn_level = attn_level
@@ -32,7 +32,6 @@ class EncoderRNN(BaseRNN):
         self.embedding = embedding
         self.field_embedding = field_embedding
         self.dataset_type = dataset_type
-        self.enc_type = enc_type
         self.dec_size = dec_size
         self.attn_size = attn_size
         self.eos_id = eos_id
@@ -49,14 +48,15 @@ class EncoderRNN(BaseRNN):
         # ----------------- encoder layer ----------------- #
         self.input_size = self.embed_size + self.fdsize + self.posit_size
 
-        if self.enc_type == 'fc':
-            self.fc = nn.Sequential(nn.Linear(self.input_size, self.dec_size), nn.ReLU())
+        self.feat_merge = nn.Sequential(nn.Linear(self.input_size, self.dec_size), nn.ReLU())
+        if self.enc_type == 'mean':
             if self.attn_size > 0:
                 self.attn_query = nn.Sequential(nn.Linear(self.dec_size, self.attn_size), nn.ELU(0.1))
                 self.attn_linear = nn.Linear(self.attn_size, self.attn_size, bias=False)
             self.linear_out = nn.Linear(self.dec_size*2, self.dec_size, bias=False)
             self.softmax = nn.Softmax(dim=2)
         else:
+            # TODO: change input size
             self.rnn = self.rnn_cell(self.input_size,
                                      self.hidden_size//self.directions,
                                      n_layers,
@@ -247,7 +247,7 @@ class EncoderRNN(BaseRNN):
                 enc_hidden = enc_hidden.contiguous()
             # print('enc_hidden: {}'.format(enc_hidden.size()))
 
-        elif self.enc_type == 'fc':
+        elif self.enc_type == 'mean':
             batch, source_len, _ = embedded.size()
             mask = enc_mask.unsqueeze(1)
             mask = mask.repeat(1, source_len, 1)
@@ -255,8 +255,9 @@ class EncoderRNN(BaseRNN):
             mask[:, mask_self_index, mask_self_index] = 1
             # print('mask: {}'.format(mask.size()))
 
-            r = self.fc(embedded)
-            r = self.dropout(r)
+            # TODO: feature merge should also applied for rnn encoder/decoder, with big feature embeddings
+            embedded = self.feat_merge(embedded)
+            r = self.dropout(embedded)
             if self.attn_size > 0:
                 r_query = self.attn_query(r)
                 r_key = self.attn_linear(r_query)

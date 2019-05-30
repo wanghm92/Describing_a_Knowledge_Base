@@ -26,7 +26,7 @@ class DecoderRNN(BaseRNN):
                  embedding=None, field_embedding=None, pos_embedding=None):
 
         self.rnn_type = rnn_cell.lower()
-        super(DecoderRNN, self).__init__(vocab_size, hidden_size, dropout_p, n_layers)
+        super(DecoderRNN, self).__init__('rnn', vocab_size, hidden_size, dropout_p, n_layers)
 
         self.decoder_type = dec_type
         self.ptr_input = ptr_input

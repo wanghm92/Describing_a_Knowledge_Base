@@ -145,7 +145,7 @@ def sanity_check(args, config):
         else:
             if config.directions == 2:
                 print("[***WARNING***]"
-                      "args.enc_type == fc and args.dec_type == prn and config.directions == 2 is not allowed"
+                      "args.enc_type == mean and args.dec_type == prn and config.directions == 2 is not allowed"
                       "Changing it to 1")
                 config.directions = 1
 
