@@ -111,6 +111,7 @@ if args.attn_level != 2 and args.attn_src == 'emb':
 
 # ------------------------------------- random seed and cuda -------------------------------------- #
 # Set the random seed manually for reproducibility.
+np.random.seed(0)
 torch.manual_seed(args.seed)
 if torch.cuda.is_available():
     if not args.cuda:
@@ -362,7 +363,7 @@ if __name__ == "__main__":
                                  mask_id=t_dataset.vocab.eos_id,
                                  embed_size=config.emsize, fdsize=fd_size, hidden_size=hidden_size,
                                  posit_size=posit_size, dec_size=hidden_size, attn_size=config.attn_size,
-                                 attn_src=args.attn_src, attn_level=args.attn_level,
+                                 attn_src=args.attn_src, attn_level=args.attn_level, attn_type=args.attn_type,
                                  dropout_p=config.dropout, n_layers=config.nlayers,
                                  rnn_cell=config.cell,
                                  directions=config.directions,
@@ -379,7 +380,7 @@ if __name__ == "__main__":
                                  mask_id=t_dataset.vocab.unk_id,
                                  embed_size=config.emsize, fdsize=fd_size, hidden_size=hidden_size,
                                  posit_size=posit_size, dec_size=hidden_size, attn_size=config.attn_size,
-                                 attn_src='rnn', attn_level=args.attn_level,
+                                 attn_src='rnn', attn_level=args.attn_level, attn_type=args.attn_type,
                                  dropout_p=config.dropout, n_layers=config.nlayers,
                                  rnn_cell=config.cell,
                                  directions=config.enc_otl_dir,
@@ -442,7 +443,7 @@ if __name__ == "__main__":
                              mask_id=mask_id,
                              embed_size=config.emsize, fdsize=fd_size, hidden_size=hidden_size,
                              posit_size=posit_size, dec_size=hidden_size, attn_size=config.attn_size,
-                             attn_src=args.attn_src, attn_level=args.attn_level,
+                             attn_src=args.attn_src, attn_level=args.attn_level, attn_type=args.attn_type,
                              dropout_p=config.dropout, n_layers=config.nlayers,
                              rnn_cell=config.cell, directions=config.directions,
                              variable_lengths=True,

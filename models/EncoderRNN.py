@@ -10,7 +10,7 @@ class EncoderRNN(BaseRNN):
                  vocab_size=0,
                  eos_id=2, mask_id=1,
                  hidden_size=0, posit_size=0, embed_size=0, fdsize=0, dec_size=0, attn_size=0,
-                 attn_src='emb', attn_level=2,
+                 attn_src='emb', attn_level=2, attn_type='',
                  dropout_p=0, n_layers=1, rnn_cell='gru', directions=2,
                  variable_lengths=True,
                  field_cat_pos=False, field_self_att=False,
@@ -22,6 +22,7 @@ class EncoderRNN(BaseRNN):
 
         self.attn_src = attn_src
         self.attn_level = attn_level
+        self.attn_type = attn_type
         self.embed_size = embed_size
         self.fdsize = fdsize
         self.posit_size = posit_size  # including forward and backward positions/rcd and ha
@@ -70,19 +71,19 @@ class EncoderRNN(BaseRNN):
         if self.attn_level > 1 and self.field_cat_pos:
             field_input_size += self.posit_size
         # print('field_input_size: {}'.format(field_input_size))
-        if self.enc_type == 'rnn':
-            self.Wf = nn.Linear(field_input_size, self.hidden_size)  # field embeddings to keys
+        if self.enc_type == 'rnn' and self.attn_type == 'cat':
+            self.Wf = nn.Linear(field_input_size, self.hidden_size, bias=False)  # field embeddings to keys
             if self.attn_level == 3:
-                self.We = nn.Linear(self.embed_size, self.hidden_size)  # word embeddings to keys
-                self.Wr = nn.Linear(enc_hidden_size, self.hidden_size)  # encoder hidden states to keys
+                self.We = nn.Linear(self.embed_size, self.hidden_size, bias=False)  # word embeddings to keys
+                self.Wr = nn.Linear(enc_hidden_size, self.hidden_size, bias=False)  # encoder hidden states to keys
             elif self.attn_level == 2:
                 if self.attn_src == 'emb':
-                    self.We = nn.Linear(self.embed_size, self.hidden_size)
+                    self.We = nn.Linear(self.embed_size, self.hidden_size, bias=False)
                 elif self.attn_src == 'rnn':
-                    self.Wr = nn.Linear(enc_hidden_size, self.hidden_size)
+                    self.Wr = nn.Linear(enc_hidden_size, self.hidden_size, bias=False)
             else:
                 # NOTE: assume to use encoder rnn hidden states when attn_level == 1
-                self.Wr = nn.Linear(enc_hidden_size, self.hidden_size)
+                self.Wr = nn.Linear(enc_hidden_size, self.hidden_size, bias=False)
         else:
             self.We = None
             self.Wf = None
@@ -180,7 +181,7 @@ class EncoderRNN(BaseRNN):
         batch_size, max_enc_len, _ = enc_hidden.size()
 
         # print('enc_hidden: {}'.format(enc_hidden.size()))
-        if self.enc_type == 'rnn':
+        if self.enc_type == 'rnn' and self.attn_type == 'cat':
             enc_keys = self._get_enc_keys(enc_hidden, enc_input, enc_field, batch_size, max_enc_len)
         else:
             enc_keys = (enc_hidden, enc_input, enc_field)

@@ -53,7 +53,7 @@ class ConfigRotowire(object):
         self.batch_size = 4
         self.valid_batch = 64
         self.dropout = 0.3
-        self.directions = 1
+        self.directions = 2
         self.enc_otl_dir = 2
         self.max_grad_norm = 5
         self.max_len = 80
