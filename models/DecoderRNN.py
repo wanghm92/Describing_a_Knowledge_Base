@@ -70,7 +70,6 @@ class DecoderRNN(BaseRNN):
             self.criterion = nn.CrossEntropyLoss(reduction='none')
 
         self_size = posit_size
-        enc_hidden_size = hidden_size * self.directions
 
         # ----------------- params for attention score ----------------- #
         field_input_size = fdsize
@@ -123,7 +122,7 @@ class DecoderRNN(BaseRNN):
         # if self.decoder_type != 'pt':
         context_size = 0  # decoder state size
         if self.attn_level == 3:
-            context_size += (enc_hidden_size + embed_size)
+            context_size += (hidden_size + embed_size)
             if self.field_context:
                 context_size += field_input_size
         elif self.attn_level == 2:
@@ -132,9 +131,9 @@ class DecoderRNN(BaseRNN):
             if self.attn_src == 'emb':
                 context_size += embed_size
             elif self.attn_src == 'rnn':
-                context_size += enc_hidden_size
+                context_size += hidden_size
         else:
-            context_size += enc_hidden_size
+            context_size += hidden_size
 
         out_bias = self.attn_type == 'cat'
         self.output_layer = nn.Linear(context_size+hidden_size, hidden_size, bias=out_bias)
@@ -143,7 +142,7 @@ class DecoderRNN(BaseRNN):
         # ----------------- parameters for p_gen ----------------- #
         if self.decoder_type == 'pg':
             # NOTE: default attn_src is rnn for pg
-            self.w_r = nn.Linear(enc_hidden_size, 1)    # encoder hidden context
+            self.w_r = nn.Linear(hidden_size, 1)    # encoder hidden context
             self.w_d = nn.Linear(hidden_size, 1)        # decoder hidden state
             self.w_y = nn.Linear(embed_size,  1)        # decoder input word embedding
             if self.attn_level > 1:

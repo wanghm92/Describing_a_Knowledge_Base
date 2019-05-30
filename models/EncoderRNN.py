@@ -58,14 +58,14 @@ class EncoderRNN(BaseRNN):
             self.softmax = nn.Softmax(dim=2)
         else:
             self.rnn = self.rnn_cell(self.input_size,
-                                     self.hidden_size,
+                                     self.hidden_size//self.directions,
                                      n_layers,
                                      batch_first=True,
                                      bidirectional=(self.directions == 2),
                                      dropout=self.dropout_p)
 
         # ----------------- params for encoder memory keys ----------------- #
-        enc_hidden_size = self.hidden_size * self.directions
+        # enc_hidden_size = self.hidden_size * self.directions
         field_input_size = self.fdsize
         # print('input_size: {}'.format(self.input_size))
         if self.attn_level > 1 and self.field_cat_pos:
@@ -75,15 +75,15 @@ class EncoderRNN(BaseRNN):
             self.Wf = nn.Linear(field_input_size, self.hidden_size, bias=False)  # field embeddings to keys
             if self.attn_level == 3:
                 self.We = nn.Linear(self.embed_size, self.hidden_size, bias=False)  # word embeddings to keys
-                self.Wr = nn.Linear(enc_hidden_size, self.hidden_size, bias=False)  # encoder hidden states to keys
+                self.Wr = nn.Linear(self.hidden_size, self.hidden_size, bias=False)  # encoder hidden states to keys
             elif self.attn_level == 2:
                 if self.attn_src == 'emb':
                     self.We = nn.Linear(self.embed_size, self.hidden_size, bias=False)
                 elif self.attn_src == 'rnn':
-                    self.Wr = nn.Linear(enc_hidden_size, self.hidden_size, bias=False)
+                    self.Wr = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
             else:
                 # NOTE: assume to use encoder rnn hidden states when attn_level == 1
-                self.Wr = nn.Linear(enc_hidden_size, self.hidden_size, bias=False)
+                self.Wr = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
         else:
             self.We = None
             self.Wf = None
@@ -97,10 +97,10 @@ class EncoderRNN(BaseRNN):
 
         # ----------------- params for directions ----------------- #
         # TODO: this bridge should have Relu/Elu
-        if self.directions == 2:
-            self.W_enc_state = nn.Linear(hidden_size * 2, hidden_size)
-        else:
-            self.W_enc_state = nn.Linear(hidden_size, hidden_size)
+        self.W_enc_state = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+        )
 
     def _get_enc_keys(self, enc_hidden, enc_input, enc_field, batch_size, max_enc_len):
         """
