@@ -50,9 +50,9 @@ class EncoderRNN(BaseRNN):
 
         self.feat_merge = nn.Sequential(nn.Linear(self.input_size, self.dec_size), nn.ReLU())
         if self.enc_type == 'mean':
+            self.attn_linear = nn.Linear(self.attn_size, self.attn_size, bias=False)
             if self.attn_size > 0:
                 self.attn_query = nn.Sequential(nn.Linear(self.dec_size, self.attn_size), nn.ELU(0.1))
-                self.attn_linear = nn.Linear(self.attn_size, self.attn_size, bias=False)
             self.linear_out = nn.Linear(self.dec_size*2, self.dec_size, bias=False)
             self.softmax = nn.Softmax(dim=2)
         else:
@@ -216,7 +216,8 @@ class EncoderRNN(BaseRNN):
             h = self.W_enc_state(h)
         return h
 
-    def forward(self, batch_s, batch_f, batch_pf, batch_pb, input_lengths=None):
+    def forward(self, batch_s, batch_f, batch_pf, batch_pb, input_lengths=None, feat_merge='cat'):
+        # TODO: feature merge should also applied for rnn encoder/decoder, with big feature embeddings
 
         # get mask for location of PAD
         # print('batch_s: {}'.format(batch_s))
@@ -234,6 +235,8 @@ class EncoderRNN(BaseRNN):
         embed_pos = torch.cat((embed_pf, embed_pb), dim=2)
         embed_field_pos = torch.cat((embed_field, embed_pos), dim=2)
         embedded = torch.cat((embed_input, embed_field_pos), dim=2)
+        if feat_merge == 'mlp':
+            embedded = self.feat_merge(embedded)
 
         if self.enc_type == 'rnn':
             if self.variable_lengths:
@@ -255,23 +258,22 @@ class EncoderRNN(BaseRNN):
             mask[:, mask_self_index, mask_self_index] = 1
             # print('mask: {}'.format(mask.size()))
 
-            # TODO: feature merge should also applied for rnn encoder/decoder, with big feature embeddings
-            embedded = self.feat_merge(embedded)
+            if not feat_merge == 'mlp':
+                embedded = self.feat_merge(embedded)
             r = self.dropout(embedded)
             if self.attn_size > 0:
                 r_query = self.attn_query(r)
-                r_key = self.attn_linear(r_query)
             else:
                 r_query = r
-                r_key = r
+            r_key = self.attn_linear(r_query)
             # print('r_query: {}'.format(r_query.size()))
             # print('r_key: {}'.format(r_key.size()))
 
-            r_query_t = r_query.transpose(1, 2)
+            r_query = r_query.transpose(1, 2)
             # print('r_query_t: {}'.format(r_query_t.size()))
 
             # (batch, t_len, d) x (batch, d, s_len) --> (batch, t_len, s_len)
-            align = torch.bmm(r_key, r_query_t)
+            align = torch.bmm(r_key, r_query)
             align.masked_fill_(mask.data.byte(), -1e10)
             # print('align: {}'.format(align.size()))
 
