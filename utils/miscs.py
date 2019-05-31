@@ -25,45 +25,36 @@ def print_save_metrics(args, config, metrics, epoch, dataset, save_file_dir,
         print('\n[{}] ref[1]: {}'.format(mdl, ref[1][0]))
         print('\n[{}] cand[1]: {}'.format(mdl, cand[1]))
 
-    cands_ids_original = [cands_ids[i + 1] for i in np.argsort(dataset.sort_indices).tolist()] \
-        if cands_ids is not None else None
-
     file_ext = '{}.'.format(mdl) if len(mdl) > 0 else ''
     if save:
         cand_file_out = "{}/evaluations/{}.epoch_{}.{}cand.txt".format(save_file_dir, args.dataset, epoch, file_ext)
         with open(cand_file_out, 'w+') as fout:
-            for c in range(len(cand)):
-                fout.write("{}\n".format(cand[c + 1]))
+            cand_original = [cand[i + 1] for i in np.argsort(dataset.sort_indices).tolist()]
+            for c in cand_original:
+                fout.write("{}\n".format(c))
 
         if sums_with_pgens is not None:
             cand_pgen_file_out = "{}/evaluations/{}.epoch_{}.{}cand.pgen.txt".format(save_file_dir, args.dataset, epoch, file_ext)
+            sums_with_pgens = [sums_with_pgens[i + 1] for i in np.argsort(dataset.sort_indices).tolist()]
             with open(cand_pgen_file_out, 'w+') as fout:
-                for c in range(len(sums_with_pgens)):
-                    fout.write("{}\n".format(sums_with_pgens[c + 1]))
+                for s in sums_with_pgens:
+                    fout.write("{}\n".format(s))
 
         if sums_with_unks is not None:
             cand_unk_file_out = "{}/evaluations/{}.epoch_{}.{}cand.unk.txt".format(save_file_dir, args.dataset, epoch, file_ext)
+            sums_with_unks = [sums_with_unks[i + 1] for i in np.argsort(dataset.sort_indices).tolist()]
             with open(cand_unk_file_out, 'w+') as fout:
-                for c in range(len(sums_with_unks)):
-                    fout.write("{}\n".format(sums_with_unks[c + 1]))
+                for s in sums_with_unks:
+                    fout.write("{}\n".format(s))
 
+        cands_ids_original = [cands_ids[i + 1] for i in np.argsort(dataset.sort_indices).tolist()] if cands_ids is not None else None
         if cands_ids_original is not None:
             eval_file_out_ids = "{}/evaluations/{}.epoch_{}.{}cand.ids.txt".format(save_file_dir, args.dataset, epoch, file_ext)
             with open(eval_file_out_ids, 'w+') as fout:
-                for c in range(len(cands_ids_original)):
-                    fout.write("{}\n".format(" ".join([str(x) for x in cands_ids_original[c]])))
+                for c in cands_ids_original:
+                    fout.write("{}\n".format(" ".join([str(x) for x in c])))
 
         if not live:
-            ref_file_out = "{}/evaluations/{}.{}ref.sum.txt".format(save_file_dir, args.dataset, file_ext)
-            with open(ref_file_out, 'w+') as fout:
-                for r in range(len(ref)):
-                    fout.write("{}\n".format(ref[r + 1][0]))
-
-            src_file_out = "{}/evaluations/{}.{}ref.tbv.txt".format(save_file_dir, args.dataset, file_ext)
-            with open(src_file_out, 'w+') as fout:
-                for s in range(len(srcs)):
-                    fout.write("{}\n".format(srcs[s + 1]))
-
             if args.type == 3:
                 src_file_onmt = "{}/evaluations/{}.{}ref.tb.onmt.txt".format(save_file_dir, args.dataset, file_ext)
                 with open(src_file_onmt, 'w+') as fout:
@@ -80,8 +71,9 @@ def print_save_metrics(args, config, metrics, epoch, dataset, save_file_dir,
                 for f in range(len(feats['fields'])):
                     fout.write("{}\n".format(feats['fields'][f + 1]))
 
+    tgts_ids_original = [tgts_ids[i + 1] for i in np.argsort(dataset.sort_indices).tolist()]
     final_scores = metrics.compute_metrics(live=live, cand=cand, ref=ref, epoch=epoch, dataset=dataset,
-                                           cands_ids=cands_ids_original, tgts_ids=tgts_ids)
+                                           cands_ids=cands_ids_original, tgts_ids=tgts_ids_original)
 
     return final_scores
 

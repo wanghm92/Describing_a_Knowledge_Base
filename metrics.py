@@ -39,16 +39,16 @@ class Metrics(object):
         pred = kwargs.pop('cands_ids', {})
         dataset = kwargs.pop('dataset', {})
         gold = kwargs.pop('tgts_ids', {})
-        if live:
-            temp_ref = kwargs.pop('ref', {})
-            cand = kwargs.pop('cand', {})
-        else:
-            reference_path = kwargs.pop('ref', '')
-            candidate_path = kwargs.pop('cand', '')
-            with open(reference_path, 'rb') as f:
-                temp_ref = pickle.load(f)
-            with open(candidate_path, 'rb') as f:
-                cand = pickle.load(f)
+        # if live:
+        temp_ref = kwargs.pop('ref', {})
+        cand = kwargs.pop('cand', {})
+        # else:
+        #     reference_path = kwargs.pop('ref', '')
+        #     candidate_path = kwargs.pop('cand', '')
+        #     with open(reference_path, 'rb') as f:
+        #         temp_ref = pickle.load(f)
+        #     with open(candidate_path, 'rb') as f:
+        #         cand = pickle.load(f)
 
         epoch = kwargs.pop('epoch', 0)
         # make dictionary
@@ -108,9 +108,9 @@ class Metrics(object):
         true_positives, predicted, total_gold = 0, 0, 0
         ndld = 0.0
 
-        for i in range(1, len(pred)+1):
+        for i in range(len(pred)):
             ascii_start = 1
-            p = self.remove_dups(pred[i-1])
+            p = self.remove_dups(pred[i])
             g = self.remove_dups(gold[i])
             s1 = ''.join([chr(ascii_start + idx) for idx in range(len(p))])
             pred_dict = {n: s for n,s in zip(p, s1)}

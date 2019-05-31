@@ -235,15 +235,6 @@ class Predictor(object):
 
             ref[i] = [' '.join(targets[j])]
 
-            # for ptr-net only
-            if locations is not None:
-                out_seq_ids = locations[j].tolist()
-                out_seq_ids = out_seq_ids[:lens[j] - 1]
-                cand_ids[i] = out_seq_ids
-                batch_outline_positions.append(out_seq_ids)
-                tgt_seq_ids = [x for x in lab_t[j].tolist() if x > 3]
-                tgt_ids[i] = tgt_seq_ids
-
             # get tokens and replace OOVs
             out_seq_clean = []
             out_seq_unk = []
@@ -263,6 +254,15 @@ class Predictor(object):
                     oov = oov_dict[symbol - self.vocab.size]
                     out_seq_clean.append(oov)
                     out_seq_unk.append(oov)
+
+            # for ptr-net only
+            if locations is not None:
+                out_seq_ids = locations[j].tolist()
+                if out_seq_clean[-1] == '<EOS>':
+                    out_seq_ids = out_seq_ids[:lens[j] - 1]
+                cand_ids[i] = out_seq_ids
+                batch_outline_positions.append(out_seq_ids)
+                tgt_ids[i] = lab_t[j].tolist()[1:-1]
 
             # post-processing for text metrics
             pgen = p_gens[j] if p_gens is not None else None

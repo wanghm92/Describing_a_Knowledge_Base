@@ -364,7 +364,7 @@ class Table2text_seq:
             content_plan = pred_ids[i]
             eval_output = []
             for record in content_plan:
-                elements = sample[int(record-1)].split(DELIM)
+                elements = sample[int(record-1)].split(DELIM)  # -1 because <EOS> is prepended to src records in loader
                 if elements[0].isdigit():
                     record_type = elements[2]
                     if not elements[2].startswith('TEAM'):
@@ -378,7 +378,8 @@ class Table2text_seq:
 
     def load_vocab(self, path):
         print("Loading data ** LIGHT ** from {}".format(path))
-        prefix = "{}/table2text_nlg/describe_kb/outputs_old".format(HOME)
+        # prefix = "{}/table2text_nlg/describe_kb/outputs_old".format(HOME)
+        prefix = "/mnt/bhd/hongmin/table2text_nlg/describe_kb/outputs_old"
         vocab_path_pkl = "{}/rotowire_vocab_prn.pkl".format(prefix)
         print("loading vocab ... from {}".format(vocab_path_pkl))
         with open(vocab_path_pkl, 'rb') as fin:
