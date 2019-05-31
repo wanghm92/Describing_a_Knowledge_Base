@@ -43,8 +43,7 @@ class PointerNet(Seq2seq):
 
         batch_s, batch_o_s, batch_f, batch_pf, batch_pb, \
         batch_t, batch_o_t, \
-        source_len, max_tail_oov, w2fs = \
-            self.unpack_batch_data(data_packages, remaining, forward_mode)
+        source_len, max_tail_oov, w2fs = self.unpack_batch_data(data_packages, remaining, forward_mode)
 
         enc_outputs, enc_keys, enc_vals, f_matrix, dec_state = self.encoder(batch_s, batch_f, batch_pf, batch_pb,
                                                                             input_lengths=source_len)

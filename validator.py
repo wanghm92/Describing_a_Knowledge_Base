@@ -20,19 +20,30 @@ class Validator(object):
     def valid(self, epoch, src='full'):
 
         if self.model.decoder_type == 'prn':
-            valid_loss = {'prn-planner': 0.0, 'prn-realizer': 0.0}
+            valid_loss = {'prn-planner': (0.0, 0.0, 0.0), 'prn-realizer': (0.0, 0.0, 0.0)}
         else:
-            valid_loss = {'{}'.format(self.model.decoder_type): 0.0}
+            valid_loss = {'{}'.format(self.model.decoder_type): (0.0, 0.0, 0.0)}
 
         num_valid_batch = len(self.v_dataset.corpus)
         num_valid_expls = self.v_dataset.len
 
+        valid_losses = 0
+        valid_switch_losses = 0
+        valid_table_fill_losses = 0
         print("{} batches to be evaluated".format(num_valid_batch))
         for batch_idx in tqdm(range(num_valid_batch)):
             batch_output, batch_size = self.valid_batch(batch_idx, src=src)
-
             for mdl, outputs in batch_output.items():
-                mean_batch_loss, _ = outputs  # total_norm is ignored
-                valid_loss[mdl] += mean_batch_loss * batch_size
+                batch_loss_bundle, _ = outputs  # total_norm is ignored
+                batch_loss, batch_switch_loss, batch_table_fill_loss = batch_loss_bundle
+                valid_losses += batch_loss * batch_size
+                if batch_switch_loss is not None:
+                    valid_switch_losses += batch_switch_loss * batch_size
+                if batch_table_fill_loss is not None:
+                    valid_table_fill_losses += batch_table_fill_loss * batch_size
 
-        return valid_loss, num_valid_expls
+        valid_loss[mdl] = (valid_losses/num_valid_expls,
+                           valid_switch_losses/num_valid_expls,
+                           valid_table_fill_losses/num_valid_expls)
+
+        return valid_loss

@@ -38,7 +38,7 @@ class Predictor(object):
         else:
             cand_ids = None
             tgt_ids = None
-        sums_with_pgens = {} if self.decoder_type == 'pg' else None
+        sums_with_pcopys = {} if self.decoder_type == 'pg' else None
         sums_with_unks = {} if self.decoder_type != 'pt' and self.unk_gen else None
         srcs = {}
         i = 0
@@ -64,24 +64,24 @@ class Predictor(object):
                 targets = summaries
 
             model_outputs = self.model(data_packages, remaining, fig=fig, forward_mode='pred', src=src)
-            dec_outs, locations, lens, losses, p_gens, selfatt, attns = model_outputs[self.model.decoder.decoder_type]
+            dec_outs, locations, lens, losses, p_copys, selfatt, attns = model_outputs[self.model.decoder.decoder_type]
 
             token_count += sum(lens)
             pred_loss += sum(losses)
 
             i, srcs, feats, ref, \
-            cand, sums_with_pgens, sums_with_unks, \
+            cand, sums_with_pcopys, sums_with_unks, \
             cand_ids, tgt_ids, \
-            batch_outline_positions = self.parse_batch(i, lens, dec_outs, p_gens, selfatt, attns,
+            batch_outline_positions = self.parse_batch(i, lens, dec_outs, p_copys, selfatt, attns,
                                                        srcs, feats, ref,
-                                                       cand, sums_with_pgens, sums_with_unks,
+                                                       cand, sums_with_pcopys, sums_with_unks,
                                                        cand_ids, tgt_ids,
                                                        sources, fields, targets, batch_idx2oov,
                                                        locations, lab_t,
                                                        fig, figs_per_batch, batch_pf, batch_idx, save_dir)
 
         avg_len = float(token_count)/dataset.len
-        others = (sums_with_unks, sums_with_pgens, cand_ids, tgt_ids, srcs, feats, avg_len)
+        others = (sums_with_unks, sums_with_pcopys, cand_ids, tgt_ids, srcs, feats, avg_len)
         out = (cand, ref, math.exp(pred_loss/token_count), others)
         return {'{}'.format(self.model.decoder.decoder_type): out}
 
@@ -101,7 +101,7 @@ class Predictor(object):
 
         batch_otls = {}
         batch_sums = {}
-        sums_with_pgens = {}
+        sums_with_pcopys = {}
         sums_with_unks = {}
 
         planner_counter = 0
@@ -165,10 +165,10 @@ class Predictor(object):
 
             pred_summaries = self.model.realizer(planner_data_packages, planner_remaining, forward_mode='pred')
 
-            dec_outs, _, summary_lens, losses, p_gens, selfatt, attns = list(pred_summaries.values())[0]
+            dec_outs, _, summary_lens, losses, p_copys, selfatt, attns = list(pred_summaries.values())[0]
             dec_outs = torch.index_select(dec_outs, 0, reverse_idx)
-            # p_gens = torch.index_select(p_gens, 0, reverse_idx) if p_gens else None
-            p_gens_list = [p_gens[i, :] for i in reverse_idx.tolist()]
+            # p_copys = torch.index_select(p_copys, 0, reverse_idx) if p_copys else None
+            p_copys_list = [p_copys[i, :] for i in reverse_idx.tolist()]
             selfatt = [selfatt[i, :, :] for i in reverse_idx.tolist()] if selfatt else None
             attns = [attns[i, :, :] for i in reverse_idx.tolist()] if selfatt else None
             summary_lens = np.array(summary_lens)[reverse_idx.tolist()].tolist()
@@ -185,11 +185,11 @@ class Predictor(object):
             targets = summaries
 
             realizer_counter, realizer_srcs, realizer_feats, realizer_ref, \
-            batch_sums, sums_with_pgens, sums_with_unks, \
+            batch_sums, sums_with_pcopys, sums_with_unks, \
             _, _, _ = self.parse_batch(realizer_counter,
-                                       summary_lens, dec_outs, p_gens_list, selfatt, attns,
+                                       summary_lens, dec_outs, p_copys_list, selfatt, attns,
                                        realizer_srcs, realizer_feats, realizer_ref,
-                                       batch_sums, sums_with_pgens, sums_with_unks,
+                                       batch_sums, sums_with_pcopys, sums_with_unks,
                                        None, None,
                                        outlines, fields, targets, batch_idx2oov,
                                        None, None,
@@ -199,7 +199,7 @@ class Predictor(object):
         others_1 = (None, None, outline_ids, outline_tgt_ids, planner_srcs, planner_feats, float(token_count_otl)/dataset.len)
         planner_output = (batch_otls, planner_ref, math.exp(planner_loss/token_count_otl), others_1)
 
-        others_2 = (sums_with_unks, sums_with_pgens, None, None, realizer_srcs, realizer_feats, float(token_count_sum)/dataset.len)
+        others_2 = (sums_with_unks, sums_with_pcopys, None, None, realizer_srcs, realizer_feats, float(token_count_sum)/dataset.len)
         realizer_output = (batch_sums, realizer_ref, math.exp(realizer_loss/token_count_sum), others_2)
 
         return {'prn-planner': planner_output, 'prn-realizer': realizer_output}
@@ -212,9 +212,9 @@ class Predictor(object):
         return torch.from_numpy(np.array(out)).to(self.device)
 
     def parse_batch(self, i,
-                    lens, dec_outs, p_gens, selfatt, attns,
+                    lens, dec_outs, p_copys, selfatt, attns,
                     srcs, feats, ref,
-                    cand, sums_with_pgens, sums_with_unks,
+                    cand, sums_with_pcopys, sums_with_unks,
                     cand_ids, tgt_ids,
                     sources, fields, targets, batch_idx2oov,
                     locations, lab_t,
@@ -265,12 +265,12 @@ class Predictor(object):
                 tgt_ids[i] = lab_t[j].tolist()[1:-1]
 
             # post-processing for text metrics
-            pgen = p_gens[j] if p_gens is not None else None
-            out, out_unk, out_with_gens = self.post_process(out_seq_clean, out_seq_unk, pgen)
+            pcopy = p_copys[j] if p_copys is not None else None
+            out, out_unk, out_with_gens = self.post_process(out_seq_clean, out_seq_unk, pcopy)
 
             cand[i] = ' '.join(out)
-            if sums_with_pgens is not None:
-                sums_with_pgens[i] = ' '.join(out_with_gens)
+            if sums_with_pcopys is not None:
+                sums_with_pcopys[i] = ' '.join(out_with_gens)
             if sums_with_unks is not None:
                 sums_with_unks[i] = ' '.join(out_unk)
 
@@ -279,29 +279,29 @@ class Predictor(object):
                 fmatrix = selfatt[j] if selfatt is not None else None
                 self.make_figure(lens[j], out, fmatrix, attns[j], batch_pf[j], sources[j], batch_idx + j, save_dir)
 
-        return i, srcs, feats, ref, cand, sums_with_pgens, sums_with_unks, cand_ids, tgt_ids, batch_outline_positions
+        return i, srcs, feats, ref, cand, sums_with_pcopys, sums_with_unks, cand_ids, tgt_ids, batch_outline_positions
 
-    def post_process(self, sentence, sentence_unk, pgen=None):
+    def post_process(self, sentence, sentence_unk, pcopy=None):
         try:
             eos = sentence.index('<EOS>')
             sentence = sentence[:eos]
             sentence_unk = sentence_unk[:eos]
-            if pgen is not None:
-                pgen = pgen[:eos]
+            if pcopy is not None:
+                pcopy = pcopy[:eos]
         except ValueError:
             pass
 
-        if pgen is None:
+        if pcopy is None:
             sentence_trim = [x for x in sentence if x != '<PAD>' and x != '<EOS>' and x != '<SOS>']
             sentence_unk_trim = [x for x in sentence_unk if x != '<PAD>' and x != '<EOS>' and x != '<SOS>']
             return sentence_trim, sentence_unk_trim, []
         else:
-            token_pgens = [(x, y, z.item()) for x, y, z in zip(sentence, sentence_unk, pgen)
+            token_pcopys = [(x, y, z.item()) for x, y, z in zip(sentence, sentence_unk, pcopy)
                            if x != '<PAD>' and x != '<EOS>' and x != '<SOS>']
-            if len(token_pgens) > 0:
-                out, out_unk, pgens_filtered = zip(*token_pgens)
-                pgens_filtered = ["_%.3f"%x if x < 0.7 else '' for x in pgens_filtered]
-                out_with_gens = ["{}{}".format('_'.join(x.split()), y) for x, y in zip(out, pgens_filtered)]
+            if len(token_pcopys) > 0:
+                out, out_unk, pcopys_filtered = zip(*token_pcopys)
+                pcopys_filtered = ["_%.3f"%x if x < 0.7 else '' for x in pcopys_filtered]
+                out_with_gens = ["{}{}".format('_'.join(x.split()), y) for x, y in zip(out, pcopys_filtered)]
                 return list(out), list(out_unk), out_with_gens
             else:
                 return [], [], []

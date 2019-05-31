@@ -28,28 +28,33 @@ class Seq2seq(nn.Module):
         source_package, outline_package, _, summary_package = data_packages
         source_len, outline_len, summary_len, max_tail_oov, w2fs, _ = remaining
 
+        # summary
         if forward_mode != 'pred':
-            batch_sum, batch_o_sum = summary_package
+            batch_sum, batch_o_sum, batch_swt, batch_ptr = summary_package
             self.max_length = batch_sum.size(1) - 1  # minus the <SOS>
         else:
-            batch_sum, batch_o_sum = None, None
+            batch_sum, batch_o_sum, batch_swt, batch_ptr = None, None, None, None
             self.max_length = 1
 
+        # source = full_table/outline
         if src == 'full':
             batch_s, batch_o_s, batch_f, batch_pf, batch_pb = source_package
 
             self.batch_size, self.max_enc_len = batch_s.size()
 
-            return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, batch_sum, batch_o_sum, \
+            return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, \
+                   batch_sum, batch_o_sum, batch_swt, batch_ptr, \
                    source_len, max_tail_oov, w2fs
         else:
+            # remove <sos> and <eos> tokens when the gold outline is used as the input
             batch_t, batch_o_t, batch_f_t, batch_pf_t, batch_pb_t, _ = [x[:, 1:-1] for x in outline_package]
+            outline_len_real = [x-2 for x in outline_len]
 
             self.batch_size, self.max_enc_len = batch_t.size()
 
-            outline_len_real = [x-1 for x in outline_len]  # minius the <SOS> in front
-
-            return batch_t, batch_o_t, batch_f_t, batch_pf_t, batch_pb_t, batch_sum, batch_o_sum, \
+            # print("outline_len_real = {}".format(outline_len_real))
+            return batch_t, batch_o_t, batch_f_t, batch_pf_t, batch_pb_t, \
+                   batch_sum, batch_o_sum, batch_swt, batch_ptr, \
                    outline_len_real, max_tail_oov, w2fs
 
     def coverage_init(self):
@@ -69,9 +74,8 @@ class Seq2seq(nn.Module):
         """
 
         batch_s, batch_o_s, batch_f, batch_pf, batch_pb, \
-        batch_sum, batch_o_sum, \
-        source_len, max_tail_oov, w2fs = \
-            self.unpack_batch_data(data_packages, remaining, forward_mode, src)
+        batch_sum, batch_o_sum, batch_swt, batch_ptr, \
+        source_len, max_tail_oov, w2fs = self.unpack_batch_data(data_packages, remaining, forward_mode, src)
 
         enc_outputs, enc_keys, enc_vals, f_matrix, dec_state = self.encoder(batch_s, batch_f, batch_pf, batch_pb,
                                                                             input_lengths=source_len)
@@ -79,9 +83,13 @@ class Seq2seq(nn.Module):
         coverage = self.coverage_init()
         decoder_inputs = self.decoder.embedding(batch_sum) if forward_mode != 'pred' else None
         tbptt = self.tbptt if forward_mode == 'train' and self.tbptt > 0 else self.max_length
+        if self.decoder_type == 'pg':
+            batch_o_sum = (batch_o_sum, batch_swt, batch_ptr)
 
-        total_norm = 0.0
-        chunk_losses = 0.0
+        total_norm = 0
+        chunk_losses = 0
+        chunk_switch_losses = 0
+        chunk_table_fill_losses = 0
         chunk_ranges = list(range(0, self.max_length, tbptt))
         for chunk_idx, chunk_start in enumerate(chunk_ranges):
             if forward_mode != 'pred':
@@ -117,13 +125,18 @@ class Seq2seq(nn.Module):
             if forward_mode != 'pred':
                 mean_batch_loss, coverage, dec_state = result
                 dec_state = detach_state(dec_state)
+                mean_batch_loss, mean_batch_switch_loss, mean_batch_table_fill_loss = mean_batch_loss
                 chunk_losses += mean_batch_loss.item()
+                if mean_batch_switch_loss is not None:
+                    chunk_switch_losses += mean_batch_switch_loss.item()
+                if mean_batch_table_fill_loss is not None:
+                    chunk_table_fill_losses += mean_batch_table_fill_loss.item()
                 retain_graph = chunk_idx < (len(chunk_ranges)-1)
                 if forward_mode == 'train':
                     total_norm = self._backprop(mean_batch_loss, total_norm, retain_graph=retain_graph)
 
         if forward_mode != 'pred':
-            result = (chunk_losses, total_norm)
+            result = ((chunk_losses, chunk_switch_losses, chunk_table_fill_losses), total_norm)
         return {'{}'.format(self.decoder_type): result}
 
     def _backprop(self, loss, total_norm, retain_graph=False):

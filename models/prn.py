@@ -28,14 +28,14 @@ class PRN(nn.Module):
             batch_t, batch_o_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t = outline_package
             batch_t = (batch_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t)
 
-            batch_sum, batch_o_sum = summary_package
+            batch_sum, batch_o_sum, batch_swt, batch_ptr = summary_package
         else:
             batch_t, batch_o_t = None, None
             batch_sum, batch_o_sum = None, None
 
         return batch_s, batch_o_s, batch_f, batch_pf, batch_pb, \
                batch_t, batch_o_t, \
-               batch_sum, batch_o_sum, \
+               batch_sum, batch_o_sum, batch_swt, batch_ptr, \
                source_len, outline_len, summary_len, max_tail_oov, w2fs
 
     def forward(self, data_packages, remaining, forward_mode='train', fig=False, src=None):

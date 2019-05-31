@@ -8,15 +8,15 @@ import numpy as np
 from utils.content_metrics import Content_Metrics
 import functools
 print = functools.partial(print, flush=True)
+MAX_PTR = 3
 
 # TODO: [Done] change replace 2-word team/city names in summary with 1 word joint with "_" delimiter
-# TODO: tokenization errors: #PT, 's,
 # TODO: player score feature: is_max, or the sequence
 # TODO: table2csv
 # TODO: sort the table records, e.g. winning team in front, starting players in front, higher scores in front
 # TODO: mask/replace with placeholder for numbers, team names, player names from word vocab to force copy
 # TODO: disable repetition on stats; allow for team names/cities
-# TODO: Spurs’, Thunders’
+# TODO: [done] Spurs’, Thunders’, 's
 # TODO: (1) enrich content plan tks (2) get pointers, for both full table and content plan
 
 # NOTE: quickly prototype to verify the idea works before doing anything fancy
@@ -258,11 +258,11 @@ class Vocabulary:
 
         return self.add_start_end(_o_outline, self.word2idx), _oov, self.add_start_end(_outline, self.word2idx), oov_freq
 
-    def vectorize_summary(self, vector, tail_oov_vocab=None):
+    def vectorize_summary(self, vector, switches, tail_oov_vocab=None):
         """ summary word to idx"""
         _o_summary, _summary = [], []
         oov_freq = 0
-        for word in vector:
+        for word, swt in zip(vector, switches):
             try:
                 _o_summary.append(self.word2idx[word])
                 _summary.append(self.word2idx[word])
@@ -273,7 +273,10 @@ class Vocabulary:
                         _o_summary.append(self.word2idx['<UNK>'])
                         _summary.append(self.word2idx['<UNK>'])
                     else:
-                        _o_summary.append(tail_oov_vocab[word] + self.size)
+                        if swt == 0:
+                            _o_summary.append(self.word2idx['<UNK>'])
+                        else:
+                            _o_summary.append(tail_oov_vocab[word] + self.size)
                         _summary.append(self.word2idx['<UNK>'])
                 else:
                     _o_summary.append(self.word2idx['<UNK>'])
@@ -447,9 +450,26 @@ class Table2text_seq:
                 ha_t.append(ha)
                 lab_t.append(lab+1)  # +1 for sources have leading <sos>; type is int
 
-            summary = old_summaries[idx]
+            summary, ptrs = old_summaries[idx]
             summary = [x.lower() for x in summary]  # NOTE: changed to lowercase strings
+            switches = [0]*len(summary)
+            otl_len = len(value_t)
+            pointer = [[otl_len]*MAX_PTR for _ in range(len(summary))]
+            if len(ptrs) > 0:
+                for x in ptrs:
+                    pos = int(x.split(',')[0])
+                    switches[pos] = 1  # to gather switch loss
+                    for i, pt in enumerate(x.split(',')[1:4]):
+                        pt = int(pt)
+                        assert pt < otl_len
+                        pointer[pos][i] = pt
 
+            # switches = np.array(switches)
+            # pointer = np.array(pointer)
+            # print("summary: \n{}".format(summary))
+            # print("ptrs: \n{}".format(ptrs))
+            # print("switches: \n{}".format(switches))
+            # print("pointer: \n{}".format(pointer))
             # print("value_s: \n{}".format(value_s))
             # print("field_s: \n{}".format(field_s))
             # print("rcd_s: \n{}".format(rcd_s))
@@ -464,6 +484,7 @@ class Table2text_seq:
             total.append(value_s + value_t + summary)
             total_field.append(field_s + field_t)
             total_rcd.append(rcd_s + rcd_t)
+            summary = (summary, switches, pointer)
             samples.append([value_s, outline, field_s, rcd_s, ha_s, table, summary])
 
             # print("total: \n{}".format(total))
@@ -510,10 +531,10 @@ class Table2text_seq:
 
     def batchfy(self):
         print("Constructing Batches ...")
-        samples = [self.data[i:i+self.batch_size] for i in range(0, len(self.data), self.batch_size)]
+        batches = [self.data[i:i+self.batch_size] for i in range(0, len(self.data), self.batch_size)]
         corpus = []
-        for sample in tqdm(samples):
-            corpus.append(self.vectorize(sample))
+        for batch in tqdm(batches):
+            corpus.append(self.vectorize(batch))
         print("oov_cnt_src: {0} ({1:.3f}%)".format(self.oov_cnt_src, 100.0*self.oov_cnt_src/self.total_cnt_src))
         print("oov_cnt_otl: {0} ({1:.3f}%)".format(self.oov_cnt_otl, 100.0*self.oov_cnt_otl/self.total_cnt_otl))
         print("oov_cnt_sum: {0} ({1:.3f}%)".format(self.oov_cnt_sum, 100.0*self.oov_cnt_sum/self.total_cnt_sum))
@@ -527,13 +548,19 @@ class Table2text_seq:
         vector.extend([0] * padding)
         return vector
 
+    def pad_vector_2d(self, mat, maxlen):
+        pad_vec = mat[0]  # ptr pre-padding for <sos> token
+        padding = maxlen - len(mat)
+        mat.extend([pad_vec] * padding)
+        return mat
+
     def pad_vec_rev(self, vector, maxlen):
         vector = vector[::-1][1:-1]
         padding = maxlen - len(vector)
         vector.extend([0] * padding)
         return vector
 
-    def vectorize(self, sample):
+    def vectorize(self, batch):
         """
             batch_s         --> tensor batch of table with ids
             batch_o_s       --> tensor batch of table with ids and <unk> replaced by temp OOV ids
@@ -548,12 +575,12 @@ class Table2text_seq:
 
         batch_o_s, batch_s, batch_f, batch_pf, batch_pb = [], [], [], [], []
         batch_o_t, batch_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t = [], [], [], [], [], []
-        batch_sum, batch_o_sum = [], []
+        batch_sum, batch_o_sum, batch_swt, batch_ptr = [], [], [], []
         source_len, outline_len, summary_len, w2fs = [], [], [], []
         sources, fields, rcds, has, outlines, summaries = [], [], [], [], [], []
         batch_idx2oov = []
         max_tail_oov = 0
-        for data in sample:
+        for data in batch:
             # print("data: {}".format(data))
             # data: [value_s, outline, field_s, rcd_s, ha_s, table, summary]
             source = data[0]
@@ -561,14 +588,24 @@ class Table2text_seq:
             field = data[2]
             rcd = data[3]
             ha = data[4]
-            table = data[5]
+            # table = data[5]
             summary = data[6]
+            summary, switches, pointer = summary
             value_t, field_t, rcd_t, ha_t, lab_t = outline  #tokens
 
-            # <EOS> and <SOS>
+            if self.data_src != 'train':
+                sources.append(source)
+                fields.append(field)
+                rcds.append(rcd)
+                has.append(ha)
+                outlines.append(value_t)
+                summaries.append(summary)
+
+            # ----------------------- determine sequence lengths ------------------------- #
+            # add 1 to lengths for <EOS> and <SOS>
             src_len = len(source)
-            sum_len = len(summary) + 2
             otl_len = len(value_t) + 2
+            sum_len = len(summary) + 2
             if self.dec_type in ['pt', 'prn']:
                 src_len += 2
 
@@ -599,7 +636,9 @@ class Table2text_seq:
             else:
                 tail_oov_vocab = None
 
-            _o_summary, _summary, oov_freq_sum = self.vocab.vectorize_summary(summary, tail_oov_vocab)
+            _o_summary, _summary, oov_freq_sum = self.vocab.vectorize_summary(summary, switches, tail_oov_vocab)
+            _switches = [0] + switches + [0]
+            _pointer = [[otl_len-2]*MAX_PTR] + pointer + [[otl_len-2]*MAX_PTR]
 
             # ----------------------- update oov stats ------------------------- #
             self.oov_cnt_src += oov_freq_src
@@ -625,14 +664,7 @@ class Table2text_seq:
             w2fs.append(w2f)
             batch_idx2oov.append(idx2oov)
 
-            if self.data_src != 'train':
-                sources.append(source)
-                fields.append(field)
-                rcds.append(rcd)
-                has.append(ha)
-                outlines.append(value_t)
-                summaries.append(summary)
-
+            # ----------------------- pack source to batch ------------------------- #
             # print("_source ({}): {}".format(len(_source), _source))
             # print("_fields ({}): {}".format(len(_fields), _fields))
             # print("_rcd ({}): {}".format(len(_rcd), _rcd))
@@ -646,6 +678,7 @@ class Table2text_seq:
             batch_pb.append(_ha)
             batch_o_s.append(_o_source)  # for scatter add
 
+            # ----------------------- pack outline to batch ------------------------- #
             # print("_outline ({}): {}".format(len(_outline), _outline))
             # print("_fields_t ({}): {}".format(len(_fields_t), _fields_t))
             # print("_rcd_t ({}): {}".format(len(_rcd_t), _rcd_t))
@@ -653,8 +686,7 @@ class Table2text_seq:
             # print("_lab_t ({}): {}".format(len(_lab_t), _lab_t))
             # print("_o_outline ({}): {}".format(len(_o_outline), _o_outline))
             # print(otl_len)
-            assert len(_outline) == len(_fields_t) == len(_rcd_t) \
-                   == len(_ha_t) == len(_lab_t) == len(_o_outline) == otl_len
+            assert len(_outline) == len(_fields_t) == len(_rcd_t) == len(_ha_t) == len(_lab_t) == len(_o_outline) == otl_len
             batch_t.append(_outline)
             batch_f_t.append(_fields_t)
             batch_pf_t.append(_rcd_t)
@@ -662,13 +694,19 @@ class Table2text_seq:
             batch_o_t.append(_outline)  # for scatter add attn weights
             batch_lab_t.append(_lab_t)  # for CrossEntropyLoss
 
+            # ----------------------- pack summary to batch ------------------------- #
             # print("_summary ({}): {}".format(len(_summary), _summary))
             # print("_o_summary ({}): {}".format(len(_o_summary), _o_summary))
-            assert len(_summary) == len(_o_summary) == sum_len
+            # print("_switches ({}): {}".format(len(_switches), _switches))
+            # print("_pointer ({}): {}".format(len(_pointer), _pointer))
+            assert len(_summary) == len(_o_summary) == len(_switches) == len(_pointer) == sum_len
             batch_sum.append(_summary)
             batch_o_sum.append(_o_summary)  # for gather NLL loss
+            batch_swt.append(_switches)
+            batch_ptr.append(_pointer)
 
         # ----------------------- convert to list of tensors and pad to max length ------------------------- #
+        # source
         batch_s = torch.stack([torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_s], dim=0)
         batch_o_s = torch.stack([torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_o_s], dim=0)
         batch_f = torch.stack([torch.LongTensor(self.pad_vector(i, max(source_len))) for i in batch_f], dim=0)
@@ -677,7 +715,7 @@ class Table2text_seq:
 
         source_package = (batch_s, batch_o_s, batch_f, batch_pf, batch_pb)
 
-        # if self.dec_type in ['pt', 'prn']:
+        # outline
         batch_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_t], dim=0)
         batch_o_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_o_t], dim=0)
         batch_f_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_f_t], dim=0)
@@ -686,26 +724,17 @@ class Table2text_seq:
         batch_lab_t = torch.stack([torch.LongTensor(self.pad_vector(i, max(outline_len))) for i in batch_lab_t], dim=0)
 
         outline_package = [batch_t, batch_o_t, batch_f_t, batch_pf_t, batch_pb_t, batch_lab_t]
-        # if self.dec_type == 'prn':
-        #     batch_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_t], dim=0)  # for emb lookup
-        #     batch_o_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_o_t], dim=0)  # for scatter add attn weights
-        #     batch_f_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_f_t], dim=0)
-        #     batch_pf_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_pf_t], dim=0)
-        #     batch_pb_t_r = torch.stack([torch.LongTensor(self.pad_vec_rev(i, max(outline_len))) for i in batch_pb_t], dim=0)
-        #     outline_pkg_rev = [batch_t_r, batch_o_t_r, batch_f_t_r, batch_pf_t_r, batch_pb_t_r]
-        # else:
         outline_pkg_rev = None
-        # else:
-        #     outline_pkg_rev = None
-        #     outline_package = None
 
-        if self.dec_type != 'pt':
+        # summary
+        if self.dec_type == 'pt':
+            summary_package = None
+        else:
             batch_sum = torch.stack([torch.LongTensor(self.pad_vector(i, max(summary_len))) for i in batch_sum], dim=0)
             batch_o_sum = torch.stack([torch.LongTensor(self.pad_vector(i, max(summary_len))) for i in batch_o_sum], dim=0)
-
-            summary_package = (batch_sum, batch_o_sum)
-        else:
-            summary_package = None
+            batch_swt = torch.stack([torch.LongTensor(self.pad_vector(i, max(summary_len))) for i in batch_swt], dim=0)
+            batch_ptr = torch.stack([torch.LongTensor(self.pad_vector_2d(i, max(summary_len))) for i in batch_ptr], dim=0)
+            summary_package = (batch_sum, batch_o_sum, batch_swt, batch_ptr)
 
         sources = [i[:max(source_len)] for i in sources]
         fields = [i[:max(source_len)] for i in fields]
@@ -714,8 +743,6 @@ class Table2text_seq:
         fields = {'fields': fields, 'rcds': rcds, 'has': has}
         outlines = [i[:max(outline_len)-2] for i in outlines]
         summaries = [i[:max(summary_len)-2] for i in summaries]
-        outline_len = [x-1 for x in outline_len]  # minus the <EOS> token for passing to encoder_otl
-
         texts_package = [sources, fields, summaries, outlines]
 
         remaining = [source_len, outline_len, summary_len, max_tail_oov, w2fs, batch_idx2oov]

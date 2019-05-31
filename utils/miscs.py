@@ -8,7 +8,7 @@ DELIM = u"￨"
 def print_save_metrics(args, config, metrics, epoch, dataset, save_file_dir,
                        cand, ref, others, live=True, save=True, mdl=''):
 
-    sums_with_unks, sums_with_pgens, cands_ids, tgts_ids, srcs, feats, _ = others
+    sums_with_unks, sums_with_pcopys, cands_ids, tgts_ids, srcs, feats, _ = others
 
     if args.verbose:
         print('\n[{}] source[1]: {}'.format(mdl, srcs[1]))
@@ -16,8 +16,8 @@ def print_save_metrics(args, config, metrics, epoch, dataset, save_file_dir,
             print('\n[{}] {}[1]: {}'.format(mdl, k, v[1]))
         if sums_with_unks is not None:
             print('\n[{}] sums_with_unks[1]: {}'.format(mdl, sums_with_unks[1]))
-        if sums_with_pgens is not None:
-            print('\n[{}] sums_with_pgens[1]: {}'.format(mdl, sums_with_pgens[1]))
+        if sums_with_pcopys is not None:
+            print('\n[{}] sums_with_pcopys[1]: {}'.format(mdl, sums_with_pcopys[1]))
         if cands_ids is not None:
             print('\n[{}] cands_ids[1]: {}'.format(mdl, cands_ids[1]))
         if tgts_ids is not None:
@@ -33,11 +33,11 @@ def print_save_metrics(args, config, metrics, epoch, dataset, save_file_dir,
             for c in cand_original:
                 fout.write("{}\n".format(c))
 
-        if sums_with_pgens is not None:
-            cand_pgen_file_out = "{}/evaluations/{}.epoch_{}.{}cand.pgen.txt".format(save_file_dir, args.dataset, epoch, file_ext)
-            sums_with_pgens = [sums_with_pgens[i + 1] for i in np.argsort(dataset.sort_indices).tolist()]
-            with open(cand_pgen_file_out, 'w+') as fout:
-                for s in sums_with_pgens:
+        if sums_with_pcopys is not None:
+            cand_pcopy_file_out = "{}/evaluations/{}.epoch_{}.{}cand.pcopy.txt".format(save_file_dir, args.dataset, epoch, file_ext)
+            sums_with_pcopys = [sums_with_pcopys[i + 1] for i in np.argsort(dataset.sort_indices).tolist()]
+            with open(cand_pcopy_file_out, 'w+') as fout:
+                for s in sums_with_pcopys:
                     fout.write("{}\n".format(s))
 
         if sums_with_unks is not None:
@@ -47,11 +47,11 @@ def print_save_metrics(args, config, metrics, epoch, dataset, save_file_dir,
                 for s in sums_with_unks:
                     fout.write("{}\n".format(s))
 
-        cands_ids_original = [cands_ids[i + 1] for i in np.argsort(dataset.sort_indices).tolist()] if cands_ids is not None else None
-        if cands_ids_original is not None:
+        if cands_ids is not None:
+            cands_ids = [cands_ids[i + 1] for i in np.argsort(dataset.sort_indices).tolist()]
             eval_file_out_ids = "{}/evaluations/{}.epoch_{}.{}cand.ids.txt".format(save_file_dir, args.dataset, epoch, file_ext)
             with open(eval_file_out_ids, 'w+') as fout:
-                for c in cands_ids_original:
+                for c in cands_ids:
                     fout.write("{}\n".format(" ".join([str(x) for x in c])))
 
         if not live:
@@ -71,9 +71,10 @@ def print_save_metrics(args, config, metrics, epoch, dataset, save_file_dir,
                 for f in range(len(feats['fields'])):
                     fout.write("{}\n".format(feats['fields'][f + 1]))
 
-    tgts_ids_original = [tgts_ids[i + 1] for i in np.argsort(dataset.sort_indices).tolist()]
+    if tgts_ids is not None:
+        tgts_ids = [tgts_ids[i + 1] for i in np.argsort(dataset.sort_indices).tolist()]
     final_scores = metrics.compute_metrics(live=live, cand=cand, ref=ref, epoch=epoch, dataset=dataset,
-                                           cands_ids=cands_ids_original, tgts_ids=tgts_ids_original)
+                                           cands_ids=cands_ids, tgts_ids=tgts_ids)
 
     return final_scores
 
@@ -145,3 +146,11 @@ def sanity_check(args, config):
     pprint(vars(args), indent=2)
     print("\n***config: ")
     pprint(vars(config), indent=2)
+
+def count_down(secs):
+    import sys
+    import time
+    for i in range(secs, 0, -1):
+        sys.stdout.write(str(i) + ' ')
+        sys.stdout.flush()
+        time.sleep(1)

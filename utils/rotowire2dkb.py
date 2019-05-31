@@ -61,7 +61,8 @@ process(src, name='source')
 process(cp_tks, is_tgt=True, name='outlines')
 with io.open(tgt, 'r', encoding='utf-8') as fin, io.open(ptrs, 'r', encoding='utf-8') as f_ptr:
     summary_tks = [x.strip().split() for x in fin.read().strip().split('\n')]
-    '''
+    # data['summaries'] = summary_tks
+    # '''
     summary_ptr = [x.strip().split() for x in f_ptr.read().strip().split('\n')]
     print(len([x for x in summary_ptr if len(x) == 0]))
     print(len(summary_ptr))
@@ -75,7 +76,6 @@ with io.open(tgt, 'r', encoding='utf-8') as fin, io.open(ptrs, 'r', encoding='ut
     assert all([x < len(y) for x, y in zip(max_positions, summary_tks)])
     data['summaries'] = list(zip(summary_tks, summary_ptr))
     #'''
-    data['summaries'] = summary_tks
 
 for k,v in data.items():
     print(len(v))

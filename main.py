@@ -19,6 +19,7 @@ import numpy as np
 from utils.miscs import print_save_metrics
 from utils.miscs import sanity_check
 import functools
+from utils.miscs import count_down
 print=functools.partial(print, flush=True)
 
 program = os.path.basename(sys.argv[0])
@@ -26,6 +27,37 @@ L = logging.getLogger(program)
 logging.basicConfig(format='%(asctime)s: %(levelname)s: %(message)s')
 logging.root.setLevel(level=logging.INFO)
 L.info("Running %s" % ' '.join(sys.argv))
+
+"""
+Stage 1:
+(1) Decoder:
+    (1.1) input to Pointer decoder is encoder hidden states
+    (1.2) general attn_type: hd_T*W*hs
+(2) THE BIG DIFFERENCE: 
+    (2.1) Stage 1 encoder states are fed as inputs to stage2 encoder --> end-to-end trainable
+
+Stage 2:
+(1) Embeddings: 
+    (1.1) feat_merge = 'mlp' --> mlp = nn.Sequential(nn.Linear(in_dim, out_dim), nn.ReLU()) on both embeddings
+    (1.2) share embedding: False
+(2) Encoder:
+    (2.1) layer = 2
+    (2.2) rnn_size = 600
+    (2.3) bridge = False
+(3) Decoder:
+    (3.1) layer = 2
+    (3.2) coverage_attn = False
+    (3.3) context_gate = None
+    (3.4) copy_attn = True, copy_attn_force = False, copy_loss_by_seqlength = False, reuse_copy_attn = True
+    (3.5) attn_type="general" which is vector dot product
+        (3.5.1) query: nn.Linear(dim, dim, bias=False) on decoder_hidden
+        (3.5.2) attn_h = [query, context]: linear_out = nn.Linear(dim*2, dim, bias=False)
+        (3.5.3) attn_h = nn.Tanh() (only for general/dot attention) is the decoder_outputs
+(4) Generator:
+    (4.1) p_copy = F.sigmoid(nn.Linear(dim, 1)) only on hidden
+    (4.2) switch_loss_criterion = nn.BCELoss(size_average=False)
+        (4.2.1) switch_loss = self.switch_loss_criterion(p_copy, align.ne(0).float().view(-1, 1))
+"""
 
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------------- Args ------------------------------------------------- #
@@ -41,7 +73,7 @@ parser.add_argument('--save', type=str, default='/mnt/bhd/hongmin/table2text_nlg
 parser.add_argument('--dataset', type=str, default='valid', choices=['test', 'valid'],
                     help='type of dataset for prediction')
 parser.add_argument('--mode', type=str, default='train', choices=['train', 'eval', 'resume'])
-parser.add_argument('--src', type=str, default='full', choices=['full', 'outline'],
+parser.add_argument('--src', type=str, default='outline', choices=['full', 'outline'],
                     help='encoder source for seq2seq/pt: full table/gold outline')
 parser.add_argument('--type', type=int, default=0, choices=[0, 1, 2, 3],
                     help='person(0)/animal(1)/wikibio(2)/rotowire(3)')
@@ -63,23 +95,23 @@ parser.add_argument('--attn_type', type=str, default='cat', choices=['cat', 'dot
                     help='type of attention score calculation: cat, dot')
 parser.add_argument('--attn_fuse', type=str, default='cat', choices=['cat', 'prod', 'no'],
                     help='type of attention score aggregation: cat, prod, no')
-parser.add_argument('--attn_level', type=int, default=2, choices=[1, 2, 3],
+parser.add_argument('--attn_level', type=int, default=1, choices=[1, 2, 3],
                     help='levels of attention: 1(hidden only), 2(hidden+field), 3(hidden+word+field) hidden=rnn/emb')
-parser.add_argument('--attn_src', type=str, default='emb', choices=['emb', 'rnn'],
+parser.add_argument('--attn_src', type=str, default='rnn', choices=['emb', 'rnn'],
                     help='encodings for attention layer: RNN hidden state(rnn) or word embeddings(emb)')
 
 parser.add_argument('--use_cov_attn', action='store_true',
                     help='whether use coverage attention')
 parser.add_argument('--use_cov_loss', action='store_true',
                     help='whether use coverage loss')
-parser.add_argument('--cov_in_pgen', action='store_true',
-                    help='whether use coverage in calculating p_gen')
+parser.add_argument('--cov_in_pcopy', action='store_true',
+                    help='whether use coverage in calculating p_copy')
 
 parser.add_argument('--field_self_att', action='store_true',
                     help='whether use field self-attention')
 parser.add_argument('--field_cat_pos', action='store_true',
                     help='whether cat pos embeddings to field embeddings for attention calculation')
-parser.add_argument('--field_context', action='store_false',
+parser.add_argument('--field_context', action='store_true',
                     help='whether pass context vector of field embeddings to output layer')
 
 parser.add_argument('--ptr_input', type=str, default='emb', choices=['emb', 'hid'],
@@ -95,6 +127,11 @@ parser.add_argument('--context_mlp', action='store_true',
 parser.add_argument('--shuffle', action='store_true',
                     help='whether to shuffle the batches during each epoch')
 
+parser.add_argument('--switch_loss', action='store_true',
+                    help='whether use switch loss')
+parser.add_argument('--table_fill_loss', action='store_true',
+                    help='whether use table_fill_loss')
+
 parser.add_argument('--fig', action='store_true',
                     help='generate attention visualization figures for evaluation')
 parser.add_argument('--verbose', action='store_false',
@@ -103,6 +140,11 @@ parser.add_argument('--xavier', action='store_false',
                     help='xavier initialization')
 
 args = parser.parse_args()
+
+if args.dec_type != 'prn' and not args.shuffle:
+    L.info(" **** WARNING **** setting shuffle to True")
+    args.shuffle = True
+    count_down(3)
 
 # ------------------------------------- checking attn_src -------------------------------------- #
 if args.attn_level != 2 and args.attn_src == 'emb':
@@ -195,13 +237,19 @@ def train(t_dataset, t4e_dataset, v_dataset, model, n_epochs, load_epoch=0):
         # ------------------------------------------------------------------------------------------ #
         L.info("Validation Epoch - {}".format(epoch))
         valid_f = Validator(model=model, v_dataset=v_dataset, use_cuda=args.cuda)
-        valid_loss, num_valid_expls = valid_f.valid(epoch, src=args.src)
-        for mdl, vloss in valid_loss.items():
-            vloss /= num_valid_expls
+        valid_losses = valid_f.valid(epoch, src=args.src)
+        for mdl, loss_bundle in valid_losses.items():
+            valid_loss, valid_switch_loss, valid_table_fill_loss = loss_bundle
             L.info('Inference Result:')
-            L.info('[{}] valid_loss: {}'.format(mdl, vloss))
+            L.info('[{}] valid_loss: {}'.format(mdl, valid_loss))
+            L.info('[{}] valid_switch_loss: {}'.format(mdl, valid_switch_loss))
+            L.info('[{}] valid_table_fill_loss: {}'.format(mdl, valid_table_fill_loss))
             if epoch > 0:
-                writer.add_scalar('loss/{}/valid'.format(mdl), vloss, epoch)
+                writer.add_scalar('epoch_loss/{}/valid'.format(mdl), valid_loss, epoch)
+                if valid_switch_loss > 0:
+                    writer.add_scalar('epoch_loss/{}/valid_switch'.format(mdl), valid_switch_loss, epoch)
+                if valid_table_fill_loss > 0:
+                    writer.add_scalar('epoch_loss/{}/valid_table_fill'.format(mdl), valid_table_fill_loss, epoch)
 
         # ------------------------------------------------------------------------------------------ #
         # --------------------------------- Inference on Valid set --------------------------------- #
@@ -217,8 +265,8 @@ def train(t_dataset, t4e_dataset, v_dataset, model, n_epochs, load_epoch=0):
             valid_scores = print_save_metrics(args, config, metrics, epoch, v_dataset, save_file_dir,
                                               cand, ref, others, live=True, mdl=mdl)
             if epoch > 0:
-                writer.add_scalar('{}/perplexity/valid'.format(mdl), valid_ppl, epoch)
-                writer.add_scalar('{}/output_len/valid'.format(mdl), others[-1], epoch)
+                writer.add_scalar('{}/valid/perplexity/'.format(mdl), valid_ppl, epoch)
+                writer.add_scalar('{}/valid/output_len'.format(mdl), others[-1], epoch)
 
                 metrics.run_logger(writer=writer, epoch=epoch, cat='valid_metrics/{}'.format(mdl))
 
@@ -233,8 +281,8 @@ def train(t_dataset, t4e_dataset, v_dataset, model, n_epochs, load_epoch=0):
                 cand, ref, train_ppl, others = results
                 L.info('[{}] Train set Result:'.format(mdl))
                 L.info('[{}] train_ppl: {}'.format(mdl, train_ppl))
-                writer.add_scalar('{}/perplexity/train'.format(mdl), train_ppl, epoch)
-                writer.add_scalar('{}/output_len/train'.format(mdl), others[-1], epoch)
+                writer.add_scalar('{}/train/perplexity'.format(mdl), train_ppl, epoch)
+                writer.add_scalar('{}/train/output_len'.format(mdl), others[-1], epoch)
                 _ = print_save_metrics(args, config, metrics, epoch, t4e_dataset, save_file_dir, cand, ref, others,
                                        live=True, save=False)
                 metrics.run_logger(writer=writer, epoch=epoch, cat='train_metrics/{}'.format(mdl))
@@ -286,22 +334,27 @@ def train(t_dataset, t4e_dataset, v_dataset, model, n_epochs, load_epoch=0):
         for idx, batch_idx in enumerate(batch_indices):
             batch_output, batch_size = train_batch(model, t_dataset, batch_idx)
             for mdl, outputs in batch_output.items():
-                mean_batch_loss, total_norm = outputs
-                # TODO: sum two losses separately
-                epoch_loss[mdl] += mean_batch_loss * batch_size
+                batch_loss_bundle, total_norm = outputs
+                batch_loss, batch_switch_loss, batch_table_fill_loss = batch_loss_bundle
+                epoch_loss[mdl] += batch_loss * batch_size
                 if idx % 1 == 0:
                     t = time.time() - start_time
                     sys.stdout.write(
-                        '%d batches trained. current batch loss: %f [%.3fs]\r' % (idx, mean_batch_loss, t))
+                        '%d batches trained. current batch loss: %f [%.3fs]\r' % (idx, batch_loss, t))
                     sys.stdout.flush()
-                writer.add_scalar('{}/batch/loss'.format(mdl), mean_batch_loss, (epoch - 1) * num_train_batch + idx + 1)
-                writer.add_scalar('{}/batch/grad_norm'.format(mdl), total_norm, (epoch - 1) * num_train_batch + idx + 1)
+                time_stamp = (epoch - 1) * num_train_batch + idx + 1
+                writer.add_scalar('{}/train/batch/loss'.format(mdl), batch_loss, time_stamp)
+                if batch_switch_loss is not None:
+                    writer.add_scalar('{}/train/batch/switch_loss'.format(mdl), batch_switch_loss, time_stamp)
+                if batch_table_fill_loss is not None:
+                    writer.add_scalar('{}/train/batch/table_fill_loss'.format(mdl), batch_table_fill_loss, time_stamp)
+                writer.add_scalar('{}/train/batch/grad_norm'.format(mdl), total_norm, time_stamp)
 
         L.info("\nFinished epoch %d" %epoch)
         for mdl, epl in epoch_loss.items():
             epl /= num_train_expls
             L.info("[%s] average loss: %.4f" % (mdl, epl))
-            writer.add_scalar('loss/{}/train'.format(mdl), epl, epoch)
+            writer.add_scalar('epoch_loss/{}/train'.format(mdl), epl, epoch)
         model.scheduler.step()
 
 # -------------------------------------------------------------------------------------------------- #
@@ -400,7 +453,7 @@ if __name__ == "__main__":
                                  attn_src=args.attn_src, attn_level=args.attn_level,
                                  attn_type=args.attn_type, attn_fuse=args.attn_fuse,
                                  ptr_dec_feat=args.ptr_dec_feat, input_feeding=args.input_feeding,
-                                 use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
+                                 use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pcopy=args.cov_in_pcopy,
                                  field_self_att=args.field_self_att, field_cat_pos=args.field_cat_pos,
                                  field_context=args.field_context, context_mlp=args.context_mlp,
                                  mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen,
@@ -421,13 +474,14 @@ if __name__ == "__main__":
                                  attn_src=args.attn_src, attn_level=args.attn_level,
                                  attn_type=args.attn_type, attn_fuse=args.attn_fuse,
                                  ptr_dec_feat=args.ptr_dec_feat, input_feeding=args.input_feeding,
-                                 use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
+                                 use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pcopy=args.cov_in_pcopy,
                                  field_self_att=args.field_self_att, field_cat_pos=args.field_cat_pos,
                                  field_context=args.field_context, context_mlp=args.context_mlp,
                                  mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen,
                                  max_len=config.max_sum_len, min_len=config.min_sum_len,
                                  dropout_p=config.dropout, n_layers=config.nlayers,
-                                 embedding=embedding, field_embedding=field_embedding, pos_embedding=pos_embedding)
+                                 embedding=embedding, field_embedding=field_embedding, pos_embedding=pos_embedding,
+                                 switch_loss=args.switch_loss, table_fill_loss=args.table_fill_loss)
 
         # full model
         planner = PointerNet(encoder_all, decoder_otl, config, input_feeding=args.input_feeding).to(device)
@@ -461,18 +515,19 @@ if __name__ == "__main__":
                              attn_src=args.attn_src, attn_level=args.attn_level,
                              attn_type=args.attn_type, attn_fuse=args.attn_fuse,
                              ptr_dec_feat=args.ptr_dec_feat, input_feeding=args.input_feeding,
-                             use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pgen=args.cov_in_pgen,
+                             use_cov_attn=args.use_cov_attn, use_cov_loss=args.use_cov_loss, cov_in_pcopy=args.cov_in_pcopy,
                              field_self_att=args.field_self_att, field_cat_pos=args.field_cat_pos,
                              field_context=args.field_context, context_mlp=args.context_mlp,
                              mask=args.mask, use_cuda=args.cuda, unk_gen=config.unk_gen,
                              max_len=max_len, min_len=min_len,
                              dropout_p=config.dropout, n_layers=config.nlayers,
-                             embedding=embedding, field_embedding=field_embedding, pos_embedding=pos_embedding)
+                             embedding=embedding, field_embedding=field_embedding, pos_embedding=pos_embedding,
+                             switch_loss=args.switch_loss, table_fill_loss=args.table_fill_loss)
 
         if args.dec_type in ['pg', 'seq']:
             model = Seq2seq(encoder, decoder, config, input_feeding=args.input_feeding).to(device)
         elif args.dec_type == 'pt':
-            model = PointerNet(encoder, decoder, config).to(device)
+            model = PointerNet(encoder, decoder, config, input_feeding=args.input_feeding).to(device)
 
     # ------------------------------------------------------------------------------------------------ #
     # -------------------------------------- Initialization ------------------------------------------ #
