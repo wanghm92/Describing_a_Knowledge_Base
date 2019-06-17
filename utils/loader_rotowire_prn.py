@@ -18,6 +18,8 @@ MAX_PTR = 3
 # TODO: disable repetition on stats; allow for team names/cities
 # TODO: [done] Spurs’, Thunders’, 's
 # TODO: (1) enrich content plan tks (2) get pointers, for both full table and content plan
+# TODO: add <SEP> in content plan and replace . with <SEP> in target
+# TODO: add features to content words in target, [0]s features to other words
 
 # NOTE: quickly prototype to verify the idea works before doing anything fancy
 
@@ -32,17 +34,19 @@ that is missing from the table
 (2) After removing this source of Hallucination, adding back features, run baseline seq-seq model
 
 (3) Improved encoder, graph construction/ graph pruning mechanisms to improve the performance
-
+    i) Node classification as content selection
+    ii) Re-arrangement as content planning
 (4) Simple mechanisms to prevent hallucination
 
 (5) Experiments:
-    i)   Masking out all values not available from the table to <NUM>
-    ii)  Removing all sentences with missing information
-    iii) etc
+    i) Masking out all values not available from the table to <NUM>
     
 (6) Supervised attention + switch loss + force copying
     
-(7) Table-reconstruction loss: attend to field+rcd_type+HA+othe_features and predict the position
+(7) Table-reconstruction loss: attend to field+rcd_type+HA+otherq_features and predict the position
+
+(8) Incorporating coreference resolution into decoder may lead to better coherence
+
 """
 
 class Vocabulary:
@@ -55,7 +59,7 @@ class Vocabulary:
                  field=None, corpus=None,
                  start_end_tokens=True,
                  max_words=20000,
-                 min_frequency=0, min_frequency_field=0, min_frequency_rcd=0,
+                 min_frequency=2, min_frequency_field=0, min_frequency_rcd=0,
                  pad_id=0, sos_id=1, eos_id=2, unk_id=3,
                  dec_type='pt'):
 
@@ -289,7 +293,7 @@ class Table2text_seq:
     def __init__(self, data_src, type=0, batch_size=128, USE_CUDA=torch.cuda.is_available(),
                  train_mode=False, dec_type='pg'):
         # prefix = "{}/table2text_nlg/data/dkb/rotowire_prn/".format(HOME)
-        prefix = "/mnt/bhd/hongmin/table2text_nlg/datasets/dkb/rotowire_prn/"
+        prefix = "/mnt/bhd/hongmin/table2text_nlg/datasets/dkb/rotowire_clean/"
 
         assert type == 3
         self.vocab = None
@@ -382,7 +386,8 @@ class Table2text_seq:
     def load_vocab(self, path):
         print("Loading data ** LIGHT ** from {}".format(path))
         # prefix = "{}/table2text_nlg/describe_kb/outputs_old".format(HOME)
-        prefix = "/mnt/bhd/hongmin/table2text_nlg/describe_kb/outputs_old"
+        # prefix = "/mnt/bhd/hongmin/table2text_nlg/describe_kb/outputs_old"
+        prefix = "/mnt/bhd/hongmin/table2text_nlg/datasets/dkb/rotowire_clean/"
         vocab_path_pkl = "{}/rotowire_vocab_prn.pkl".format(prefix)
         print("loading vocab ... from {}".format(vocab_path_pkl))
         with open(vocab_path_pkl, 'rb') as fin:
@@ -397,7 +402,9 @@ class Table2text_seq:
     def load_data(self, path):
 
         # prefix = "{}/table2text_nlg/describe_kb/outputs_old".format(HOME)
-        prefix = "/mnt/bhd/hongmin/table2text_nlg/describe_kb/outputs_old"
+        # prefix = "/mnt/bhd/hongmin/table2text_nlg/describe_kb/outputs_old"
+        prefix = "/mnt/bhd/hongmin/table2text_nlg/datasets/dkb/rotowire_clean/"
+
         print("Loading data from {}".format(path))
         # (qkey, qitem, index)
         with open(path, 'rb') as fin:
