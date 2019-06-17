@@ -59,6 +59,20 @@ Stage 2:
         (4.2.1) switch_loss = self.switch_loss_criterion(p_copy, align.ne(0).float().view(-1, 1))
 """
 
+"""
+NOTES from attending NAACL19:
+(1) Learn how to discover --> formalize/define a research problem is way more important than getting some incremental improvements on some datasets, like tweaking an existing model
+(2) Build on success is crucial:
+    (2.1) Examine the code from start to end, get the full PRN done, if not working, leave it and go to Ratish's code
+    (2.2) This has been great practice but for the sake of future success, priority should be on assembling the toolkit: opennmt-py + huggingface(BERT+TransformerXL+GPT2+GCN)
+(3) Start writing the paper early, selling a story also play a big part  
+(4) NeuralGen Workshop:
+    (4.1) http://www.phontron.com/slides/neubig19neuralgen.pdf
+    (4.2) Evaluations: correctness, specificity/diversity, creativity
+    (4.3) Decoding: Temperature Annealing
+    (4.4) RL on seq2seq: smaller learning rate; switch to vanilla SGD; bigger batch 
+"""
+
 # -------------------------------------------------------------------------------------------------- #
 # ------------------------------------------- Args ------------------------------------------------- #
 # -------------------------------------------------------------------------------------------------- #
@@ -75,7 +89,7 @@ parser.add_argument('--dataset', type=str, default='valid', choices=['test', 'va
 parser.add_argument('--mode', type=str, default='train', choices=['train', 'eval', 'resume'])
 parser.add_argument('--src', type=str, default='outline', choices=['full', 'outline'],
                     help='encoder source for seq2seq/pt: full table/gold outline')
-parser.add_argument('--type', type=int, default=0, choices=[0, 1, 2, 3],
+parser.add_argument('--type', type=int, default=3, choices=[0, 1, 2, 3],
                     help='person(0)/animal(1)/wikibio(2)/rotowire(3)')
 parser.add_argument('--mask', action='store_true',
                     help='false(0)/true(1)')
@@ -114,7 +128,7 @@ parser.add_argument('--field_cat_pos', action='store_true',
 parser.add_argument('--field_context', action='store_true',
                     help='whether pass context vector of field embeddings to output layer')
 
-parser.add_argument('--ptr_input', type=str, default='emb', choices=['emb', 'hid'],
+parser.add_argument('--ptr_input', type=str, default='hid', choices=['emb', 'hid'],
                     help='input to pointer-network emb: normal word+feat/hidden: memory bank hidden vectors')
 parser.add_argument('--ptr_dec_feat', action='store_false',
                     help='whether to cat features for ptr-net decoder')
@@ -124,7 +138,7 @@ parser.add_argument('--ptr_feat_merge', type=str, default='mlp', choices=['cat',
 parser.add_argument('--context_mlp', action='store_true',
                     help='MLP layer on context vectors before output layer')
 
-parser.add_argument('--shuffle', action='store_true',
+parser.add_argument('--shuffle', action='store_false',
                     help='whether to shuffle the batches during each epoch')
 
 parser.add_argument('--switch_loss', action='store_true',
@@ -596,12 +610,12 @@ if __name__ == "__main__":
                                  batch_size=config.valid_batch, dec_type=args.dec_type)
         print(dataset.sort_indices)
         L.info("Read $-{}-$ data".format(args.dataset))
-        predictor = Predictor(model, dataset.vocab, args.cuda,
+        predictor = Predictor(model=model, vocab=dataset.vocab, use_cuda=args.cuda,
                               decoder_type=args.dec_type, unk_gen=config.unk_gen, dataset_type=args.type)
         L.info("number of test examples: %d" % dataset.len)
 
         L.info("Start Evaluating ...")
-        valid_results = predictor.inference(dataset, fig=args.fig, save_dir=save_file_dir)
+        valid_results = predictor.inference(dataset, save_dir=save_file_dir, src=args.src)
         for mdl, results in valid_results.items():
             cand, ref, ppl, others = results
             L.info('[{}] Result:'.format(mdl))
