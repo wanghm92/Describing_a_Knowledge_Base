@@ -38,7 +38,7 @@ class ConfigRotowire(object):
     def __init__(self):
         self.cell = "LSTM"
         self.optimizer = "adam"
-        self.decay_rate = 0.95
+        self.decay_rate = 0.97
         self.decay_start = 1
         self.emsize = 256
         self.fdsize = 128
@@ -48,7 +48,7 @@ class ConfigRotowire(object):
         self.attn_size = 128
         self.pemsize = 5
         self.nlayers = 1
-        self.lr = 0.0002
+        self.lr = 0.0007
         self.epochs = 30
         self.batch_size = 4
         self.valid_batch = 64
@@ -56,10 +56,10 @@ class ConfigRotowire(object):
         self.directions = 1
         self.enc_otl_dir = 2
         self.max_grad_norm = 5
-        self.max_len = 80
-        self.max_sum_len = 500
-        self.min_len = 35
-        self.min_sum_len = 350
+        self.max_len = 60
+        self.max_sum_len = 300
+        self.min_len = 20
+        self.min_sum_len = 100
         self.unk_gen = True  # allow generating UNK
         self.scheduler = 'exp'
         self.tbptt = 100
